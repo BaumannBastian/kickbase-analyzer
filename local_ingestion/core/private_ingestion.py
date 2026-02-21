@@ -286,6 +286,7 @@ def _build_odds_rows(
     config: PrivateIngestionConfig,
     cache: JsonFileCache,
     *,
+    now: datetime | None,
     odds_transport: OddsHttpTransport | None,
 ) -> list[dict[str, Any]]:
     if config.odds_api_key is None:
@@ -306,7 +307,13 @@ def _build_odds_rows(
         transport=odds_transport,
     )
     events = client.fetch_upcoming_events(limit=config.odds_match_limit)
-    return build_odds_rows(events)
+    if now is None:
+        collected_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    elif now.tzinfo is None:
+        collected_at = now.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
+    else:
+        collected_at = now.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return build_odds_rows(events, collected_at=collected_at)
 
 
 def run_private_ingestion(
@@ -344,6 +351,7 @@ def run_private_ingestion(
         rows_by_dataset[SOURCE_TO_DATASET["odds"]] = _build_odds_rows(
             config,
             cache,
+            now=now,
             odds_transport=odds_transport,
         )
 

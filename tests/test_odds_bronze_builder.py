@@ -29,9 +29,11 @@ class OddsBronzeBuilderTests(unittest.TestCase):
                 "bookmakers": [
                     {
                         "key": "book_a",
+                        "last_update": "2026-03-01T13:45:00Z",
                         "markets": [
                             {
                                 "key": "h2h",
+                                "last_update": "2026-03-01T13:51:00Z",
                                 "outcomes": [
                                     {"name": "FC A", "price": 1.8},
                                     {"name": "Draw", "price": 3.8},
@@ -40,6 +42,7 @@ class OddsBronzeBuilderTests(unittest.TestCase):
                             },
                             {
                                 "key": "totals",
+                                "last_update": "2026-03-01T13:58:00Z",
                                 "outcomes": [
                                     {"name": "Over", "price": 1.9, "point": 2.5},
                                     {"name": "Under", "price": 1.95, "point": 2.5},
@@ -49,9 +52,11 @@ class OddsBronzeBuilderTests(unittest.TestCase):
                     },
                     {
                         "key": "book_b",
+                        "last_update": "2026-03-01T13:40:00Z",
                         "markets": [
                             {
                                 "key": "h2h",
+                                "last_update": "2026-03-01T13:49:00Z",
                                 "outcomes": [
                                     {"name": "FC A", "price": 1.85},
                                     {"name": "Draw", "price": 3.7},
@@ -64,11 +69,13 @@ class OddsBronzeBuilderTests(unittest.TestCase):
             }
         ]
 
-        rows = build_odds_rows(events)
+        rows = build_odds_rows(events, collected_at="2026-03-01T14:00:00Z")
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row["odds_event_id"], "event_1")
         self.assertEqual(row["bookmaker_count"], 2)
+        self.assertEqual(row["odds_collected_at"], "2026-03-01T14:00:00Z")
+        self.assertEqual(row["odds_last_changed_at"], "2026-03-01T13:58:00Z")
         self.assertAlmostEqual(float(row["h2h_home_odds"]), 1.825, places=3)
         self.assertAlmostEqual(float(row["h2h_draw_odds"]), 3.75, places=2)
         self.assertAlmostEqual(float(row["h2h_away_odds"]), 4.45, places=2)

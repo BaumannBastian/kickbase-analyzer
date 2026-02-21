@@ -66,6 +66,8 @@ LI_COLUMNS = [
 ODDS_COLUMNS = [
     "odds_event_id",
     "commence_time",
+    "odds_collected_at",
+    "odds_last_changed_at",
     "home_team",
     "away_team",
     "h2h_home_odds",

@@ -29,7 +29,7 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def _to_iso(value: Any) -> str | None:
+def _to_utc_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     text = value.strip()
@@ -40,10 +40,17 @@ def _to_iso(value: Any) -> str | None:
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
-        return value
+        return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(UTC)
+
+
+def _to_iso(value: Any) -> str | None:
+    parsed = _to_utc_datetime(value)
+    if parsed is None:
+        return None
+    return parsed.isoformat().replace("+00:00", "Z")
 
 
 def _median_or_none(values: list[float]) -> float | None:
@@ -71,6 +78,46 @@ def _normalize_probability(*odds_values: float | None) -> list[float | None]:
         else:
             normalized.append(round(value / total, 6))
     return normalized
+
+
+def _latest_iso_timestamp(values: list[Any]) -> str | None:
+    latest: datetime | None = None
+    for value in values:
+        parsed = _to_utc_datetime(value)
+        if parsed is None:
+            continue
+        if latest is None or parsed > latest:
+            latest = parsed
+    if latest is None:
+        return None
+    return latest.isoformat().replace("+00:00", "Z")
+
+
+def _collect_odds_update_markers(event: dict[str, Any]) -> list[Any]:
+    markers: list[Any] = []
+
+    def _add_known_fields(payload: dict[str, Any]) -> None:
+        for key in ("last_update", "lastUpdate", "updated_at", "updatedAt"):
+            if key in payload:
+                markers.append(payload.get(key))
+
+    _add_known_fields(event)
+    bookmakers = event.get("bookmakers")
+    if isinstance(bookmakers, list):
+        for bookmaker in bookmakers:
+            if not isinstance(bookmaker, dict):
+                continue
+            _add_known_fields(bookmaker)
+
+            markets = bookmaker.get("markets")
+            if not isinstance(markets, list):
+                continue
+            for market in markets:
+                if not isinstance(market, dict):
+                    continue
+                _add_known_fields(market)
+
+    return markers
 
 
 def _select_totals_line(
@@ -120,8 +167,15 @@ def _select_totals_line(
     return round(float(selected_point), 2), over_odds, under_odds
 
 
-def build_odds_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_odds_rows(
+    events: list[dict[str, Any]],
+    *,
+    collected_at: str | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    collected_at_iso = _to_iso(collected_at)
+    if collected_at_iso is None:
+        collected_at_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     for event in events:
         if not isinstance(event, dict):
@@ -204,6 +258,7 @@ def build_odds_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         totals_available_lines = sorted(round(float(point), 2) for point in totals_by_point)
 
         totals_probs = _normalize_probability(totals_over_odds, totals_under_odds)
+        odds_last_changed_at = _latest_iso_timestamp(_collect_odds_update_markers(event))
 
         rows.append(
             {
@@ -211,6 +266,8 @@ def build_odds_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "sport_key": sport_key,
                 "sport_title": sport_title,
                 "commence_time": commence_time,
+                "odds_collected_at": collected_at_iso,
+                "odds_last_changed_at": odds_last_changed_at,
                 "home_team": home_team,
                 "away_team": away_team,
                 "bookmaker_count": len(bookmaker_keys),
