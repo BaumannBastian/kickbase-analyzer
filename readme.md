@@ -216,6 +216,10 @@ Source Connectivity Checks:
 - `./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
 - `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
 
+Hinweis LigaInsider URL:
+- Nicht die Homepage (`https://www.ligainsider.de/`) nutzen
+- Stattdessen Team-Aufstellungsseiten (eine oder mehrere, comma-separated in `LIGAINSIDER_STATUS_URL`)
+
 Power BI API Runner:
 - `./scripts/powerbi/run_powerbi_api.sh list-workspaces`
 - `./scripts/powerbi/run_powerbi_api.sh list-datasets --workspace-id <workspace_id>`

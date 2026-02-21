@@ -42,6 +42,17 @@ DATA_ATTR_RE = re.compile(
     r'(?P<key>data-[a-zA-Z0-9_-]+)=["\'](?P<value>[^"\']*)["\']',
     flags=re.IGNORECASE,
 )
+PLAYER_LINK_RE = re.compile(
+    r'<a\s+href="/(?P<slug>[a-z0-9\-]+)_(?P<pid>\d+)/"[^>]*>(?P<body>.*?)</a>',
+    flags=re.IGNORECASE | re.DOTALL,
+)
+PLAYER_PHOTO_LINK_RE = re.compile(
+    r'<div\s+class="player_position_photo[^"]*"[^>]*>\s*'
+    r'<a\s+href="/(?P<slug>[a-z0-9\-]+)_(?P<pid>\d+)/"[^>]*>(?P<body>.*?)</a>',
+    flags=re.IGNORECASE | re.DOTALL,
+)
+HTML_TAG_RE = re.compile(r"<[^>]+>")
+ALT_ATTR_RE = re.compile(r'alt="(?P<alt>[^"]+)"', flags=re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -182,6 +193,10 @@ class LigaInsiderScraper:
         if rows:
             return rows
 
+        rows = cls._parse_team_page_rows(html_text)
+        if rows:
+            return rows
+
         rows = cls._parse_data_attribute_rows(html_text)
         if rows:
             return rows
@@ -255,6 +270,58 @@ class LigaInsiderScraper:
             out.append(row)
 
         return out
+
+    @classmethod
+    def _parse_team_page_rows(cls, html_text: str) -> list[dict[str, Any]]:
+        team_marker = '<div class="team_squad_area">'
+        split_idx = html_text.find(team_marker)
+        start_idx = html_text.find('<div class="player_position_row')
+
+        if split_idx < 0 or start_idx < 0 or start_idx >= split_idx:
+            return []
+
+        starter_fragment = html_text[start_idx:split_idx]
+        bench_fragment = html_text[split_idx:]
+
+        rows: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def append_from_fragment(fragment: str, lineup: str) -> None:
+            for link in PLAYER_PHOTO_LINK_RE.finditer(fragment):
+                slug = link.group("slug").strip().lower()
+                body = link.group("body")
+                name = cls._extract_name_from_link_body(body)
+                if not slug or not name:
+                    continue
+                key = (slug, "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(
+                    {
+                        "ligainsider_player_slug": slug,
+                        "player_name": name,
+                        "status": "unknown",
+                        "predicted_lineup": lineup,
+                        "competition_risk": "unknown",
+                    }
+                )
+
+        append_from_fragment(starter_fragment, "starter")
+        append_from_fragment(bench_fragment, "bench")
+        return rows
+
+    @staticmethod
+    def _extract_name_from_link_body(body: str) -> str:
+        alt_match = ALT_ATTR_RE.search(body)
+        if alt_match is not None:
+            candidate = html.unescape(alt_match.group("alt").strip())
+            if candidate:
+                return candidate
+
+        text = HTML_TAG_RE.sub(" ", body)
+        text = html.unescape(text).strip()
+        return re.sub(r"\s+", " ", text)
 
     @classmethod
     def _to_row_candidate(cls, node: dict[str, Any]) -> dict[str, Any] | None:

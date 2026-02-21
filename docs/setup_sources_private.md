@@ -11,7 +11,7 @@ KICKBASE_BASE_URL=<kickbase_api_base_url>
 KICKBASE_LEAGUE_ID=<league_id>
 KICKBASE_EMAIL=<login_email>
 KICKBASE_PASSWORD=<login_password>
-LIGAINSIDER_STATUS_URL=<vollstaendige_status_url>
+LIGAINSIDER_STATUS_URL=<team_url_1>,<team_url_2>,...
 ```
 
 Optionale Auth-Feldnamen (falls Endpoint andere Keys erwartet):
@@ -41,6 +41,11 @@ Erwartung:
 Erwartung:
 - `status = success`
 - `row_count > 0`
+
+Wichtig: Die LigaInsider Homepage (`https://www.ligainsider.de/`) enthaelt nicht die benoetigten Team-Aufstellungsdaten im erwarteten Format.
+Nutze Team-Aufstellungsseiten wie z. B.:
+- `https://www.ligainsider.de/fc-bayern-muenchen/1/`
+- `https://www.ligainsider.de/borussia-dortmund/14/`
 
 ## 4) Private Ingestion ausfuehren
 

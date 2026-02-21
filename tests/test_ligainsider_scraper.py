@@ -100,6 +100,26 @@ class LigaInsiderScraperTests(unittest.TestCase):
             self.assertIn("scraped_at", rows[0])
             self.assertEqual(len(transport.calls), 2)
 
+    def test_parse_rows_from_team_page_markup(self) -> None:
+        html_text = """
+        <div class="player_position_row">
+          <div class="player_position_photo">
+            <a href="/max-beispiel_1234/"><img alt="Max Beispiel" /></a>
+          </div>
+        </div>
+        <div class="team_squad_area">
+          <div class="player_position_photo pull-left">
+            <a href="/luca-test_5678/"><img alt="Luca Test" /></a>
+          </div>
+        </div>
+        <div class="league_name_holder"></div>
+        """
+        rows = LigaInsiderScraper.parse_status_rows(html_text)
+        self.assertEqual(len(rows), 2)
+        by_slug = {str(row["ligainsider_player_slug"]): row for row in rows}
+        self.assertEqual(by_slug["max-beispiel"]["predicted_lineup"], "starter")
+        self.assertEqual(by_slug["luca-test"]["predicted_lineup"], "bench")
+
 
 if __name__ == "__main__":
     unittest.main()

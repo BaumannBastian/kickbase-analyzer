@@ -88,7 +88,22 @@ def run_private_ingestion(
             cache_ttl_seconds=config.cache_ttl_seconds,
             transport=ligainsider_transport,
         )
-        ligainsider_rows = ligainsider_scraper.fetch_status_snapshot(config.ligainsider_status_url)
+        ligainsider_rows = []
+        seen_keys: set[tuple[str, str]] = set()
+        for raw_url in str(config.ligainsider_status_url).split(","):
+            url = raw_url.strip()
+            if not url:
+                continue
+            rows_for_url = ligainsider_scraper.fetch_status_snapshot(url)
+            for row in rows_for_url:
+                key = (
+                    str(row.get("ligainsider_player_slug", "")).strip().lower(),
+                    str(row.get("player_name", "")).strip().lower(),
+                )
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                ligainsider_rows.append(row)
     else:
         ligainsider_rows = []
 
