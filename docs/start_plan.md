@@ -26,6 +26,8 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 
 ### Deliverables
 - [x] Kickbase API Client (private mode)
+- [x] Kickbase Auth Check Script
+- [x] LigaInsider Web Scraper (private mode)
 - [x] Konfigurierbares Rate-Limit + Retry
 - [x] Bronze Writer fuer echte API Responses
 - [x] Scheduler Job (lokal)
@@ -54,7 +56,9 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - [x] Risk-Basisoutputs (p10/p50/p90, stddev, p_dnp)
 - [x] Risk Outputs via Monte-Carlo
 - [x] BigQuery RAW Loader + CORE/MARTS View-Skripte
+- [x] BigQuery CLI Setup Skripte (Install/Auth/Check)
 - [x] Backtesting Harness (matchday aligned)
+- [x] Power BI REST API Skripte (Workspace/Dataset/Refresh)
 - [ ] BigQuery MARTS v0 mit echten Cloud-Runs
 
 ### Definition of Done
@@ -74,5 +78,5 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - Doku und technische Entscheidungen nachziehen
 
 ## Heute naechster Schritt
-1) BigQuery RAW/CORE Loader aufsetzen
-2) Danach Risk-Monte-Carlo + Backtesting Harness
+1) BigQuery Cloud-Run mit echtem Projekt testen
+2) Danach Power BI Dashboard v0 auf MARTS finalisieren

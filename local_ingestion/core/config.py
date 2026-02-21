@@ -36,10 +36,15 @@ class PrivateIngestionConfig:
     password: str
     source_version: str
     auth_path: str
+    auth_email_field: str
+    auth_password_field: str
     player_snapshot_path: str
     match_stats_path: str
     cache_dir: Path
     cache_ttl_seconds: int
+    ligainsider_status_url: str | None
+    ligainsider_user_agent: str
+    ligainsider_retry: RetryConfig
     ligainsider_status_file: Path | None
     retry: RetryConfig
 
@@ -104,6 +109,12 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
 
     source_version = os.environ.get("SOURCE_VERSION", "private-v1").strip() or "private-v1"
     auth_path = os.environ.get("KICKBASE_AUTH_PATH", "/auth/login").strip() or "/auth/login"
+    auth_email_field = (
+        os.environ.get("KICKBASE_AUTH_EMAIL_FIELD", "email").strip() or "email"
+    )
+    auth_password_field = (
+        os.environ.get("KICKBASE_AUTH_PASSWORD_FIELD", "password").strip() or "password"
+    )
     player_snapshot_path = (
         os.environ.get("KICKBASE_PLAYER_SNAPSHOT_PATH", "/leagues/{league_id}/players/snapshot")
         .strip()
@@ -134,6 +145,40 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
     cache_dir = Path(os.environ.get("KICKBASE_CACHE_DIR", "data/cache/kickbase"))
     cache_ttl_seconds = _get_int_env("KICKBASE_CACHE_TTL_SECONDS", default=300)
 
+    ligainsider_status_url = os.environ.get("LIGAINSIDER_STATUS_URL", "").strip() or None
+    ligainsider_user_agent = (
+        os.environ.get("LIGAINSIDER_USER_AGENT", "kickbase-analyzer/0.1 (+private-use)")
+        .strip()
+        or "kickbase-analyzer/0.1 (+private-use)"
+    )
+    ligainsider_retry = RetryConfig(
+        timeout_seconds=_get_float_env(
+            "LIGAINSIDER_TIMEOUT_SECONDS",
+            default=retry.timeout_seconds,
+        ),
+        max_retries=_get_int_env(
+            "LIGAINSIDER_MAX_RETRIES",
+            default=retry.max_retries,
+        ),
+        backoff_seconds=_get_float_env(
+            "LIGAINSIDER_BACKOFF_SECONDS",
+            default=retry.backoff_seconds,
+        ),
+        rate_limit_seconds=_get_float_env(
+            "LIGAINSIDER_RATE_LIMIT_SECONDS",
+            default=max(1.0, retry.rate_limit_seconds),
+        ),
+    )
+
+    if ligainsider_retry.max_retries < 0:
+        raise ValueError("LIGAINSIDER_MAX_RETRIES must be >= 0")
+    if ligainsider_retry.timeout_seconds <= 0:
+        raise ValueError("LIGAINSIDER_TIMEOUT_SECONDS must be > 0")
+    if ligainsider_retry.backoff_seconds < 0:
+        raise ValueError("LIGAINSIDER_BACKOFF_SECONDS must be >= 0")
+    if ligainsider_retry.rate_limit_seconds < 0:
+        raise ValueError("LIGAINSIDER_RATE_LIMIT_SECONDS must be >= 0")
+
     ligainsider_raw = os.environ.get("LIGAINSIDER_STATUS_FILE", "").strip()
     ligainsider_status_file = Path(ligainsider_raw) if ligainsider_raw else None
 
@@ -144,10 +189,15 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
         password=password,
         source_version=source_version,
         auth_path=auth_path,
+        auth_email_field=auth_email_field,
+        auth_password_field=auth_password_field,
         player_snapshot_path=player_snapshot_path,
         match_stats_path=match_stats_path,
         cache_dir=cache_dir,
         cache_ttl_seconds=cache_ttl_seconds,
+        ligainsider_status_url=ligainsider_status_url,
+        ligainsider_user_agent=ligainsider_user_agent,
+        ligainsider_retry=ligainsider_retry,
         ligainsider_status_file=ligainsider_status_file,
         retry=retry,
     )

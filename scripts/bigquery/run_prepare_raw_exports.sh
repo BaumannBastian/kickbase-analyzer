@@ -11,4 +11,5 @@
 # ------------------------------------
 
 set -euo pipefail
+export PATH="$HOME/bin:$PATH"
 python3 -m bigquery.raw_load.prepare_raw_exports "$@"

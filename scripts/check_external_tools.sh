@@ -11,6 +11,7 @@
 # ------------------------------------
 
 set -euo pipefail
+export PATH="$HOME/bin:$PATH"
 
 check_tool() {
   local tool="$1"

@@ -295,7 +295,7 @@ kickbase-analyzer/
 
 ### MVP-1 (local ingestion → bronze files)
 - [x] Kickbase client: auth + snapshot pulls
-- [ ] LigaInsider scraper: status/lineup + timestamps
+- [x] LigaInsider scraper: status/lineup + timestamps
 - [x] Local scheduler + rate limit + caching
 - [x] Bronze file writer + run metadata
 
@@ -315,6 +315,7 @@ kickbase-analyzer/
 - [x] RAW loader (JSONL Export + bq CLI Upload Script)
 - [x] CORE transformations (BigQuery SQL Views + Apply Script)
 - [x] MARTS views (lokaler Prototype-Builder + BigQuery SQL Views)
+- [x] Power BI REST API helper scripts (workspaces/datasets/refresh)
 - [ ] Power BI dashboards v0 (leaderboard + breakdown + MW + risk)
 
 ### v1+

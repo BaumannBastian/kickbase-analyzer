@@ -57,7 +57,8 @@ packages = [
   "local_ingestion",
   "local_ingestion.core",
   "local_ingestion.runners",
-  "local_ingestion.kickbase_client"
+  "local_ingestion.kickbase_client",
+  "local_ingestion.ligainsider_scraper"
 ]
 
 [tool.pytest.ini_options]

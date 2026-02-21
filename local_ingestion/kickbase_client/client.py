@@ -91,6 +91,8 @@ class KickbaseClient:
         *,
         base_url: str,
         auth_path: str,
+        auth_email_field: str = "email",
+        auth_password_field: str = "password",
         player_snapshot_path: str,
         match_stats_path: str,
         email: str,
@@ -104,6 +106,8 @@ class KickbaseClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth_path = auth_path
+        self.auth_email_field = auth_email_field
+        self.auth_password_field = auth_password_field
         self.player_snapshot_path = player_snapshot_path
         self.match_stats_path = match_stats_path
         self.email = email
@@ -120,7 +124,10 @@ class KickbaseClient:
         payload = self._request_json(
             method="POST",
             path=self.auth_path,
-            payload={"email": self.email, "password": self.password},
+            payload={
+                self.auth_email_field: self.email,
+                self.auth_password_field: self.password,
+            },
             token=None,
         )
 

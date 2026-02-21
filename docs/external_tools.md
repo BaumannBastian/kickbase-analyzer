@@ -1,50 +1,60 @@
 # External Tools Workflow
 
-## Aktueller Status in dieser Umgebung
-
-- `databricks` Linux CLI: nicht installiert
-- `bq` CLI: nicht installiert
-- `gcloud` CLI: nicht installiert
-- `pwsh` (PowerShell): nicht installiert
-
-Zusatzbefund:
-- Eine Windows-Databricks-CLI ist vorhanden: `C:\\Users\\basti\\AppData\\Local\\DatabricksCLI\\databricks.exe`
-- Eine Databricks-Auth-Konfiguration ist vorhanden: `C:\\Users\\basti\\.databrickscfg`
-- In dieser WSL-Sitzung lassen sich Windows-Binaries jedoch aktuell nicht ausführen (Interop-Fehler), daher ist die vorhandene Windows-CLI hier nicht nutzbar.
-
 ## Databricks (CLI)
 
-Ziel: Jobs fuer Bronze/Silver/Gold aus dem Repo steuern.
+Ziel: Bronze/Silver/Gold Jobs aus dem Repo synchronisieren und ausfuehren.
 
-Empfohlener Ablauf:
-1) Databricks CLI installieren
-2) Auth konfigurieren (`databricks auth login`)
-3) Workspace/Jobs per `databricks.yml` oder JSON definieren
-4) Jobs via Skript triggern (z.B. `scripts/run_databricks_jobs.sh`)
+Kernkommandos:
+1) Repo synchronisieren  
+`python3 -m scripts.databricks.sync_repo --repo-path "/Repos/<user>/kickbase-analyzer" --branch main --profile "<profile>"`
+2) Jobs anlegen/aktualisieren  
+`python3 -m scripts.databricks.create_lakehouse_jobs --repo-path "/Repos/<user>/kickbase-analyzer" --profile "<profile>"`
+3) Jobs ausfuehren  
+`python3 -m scripts.databricks.run_lakehouse_jobs --stage all --profile "<profile>" --job-id-bronze <id> --job-id-silver <id> --job-id-gold <id>`
 
 ## BigQuery (CLI)
 
 Ziel: RAW/CORE/MARTS Uploads und SQL-Transformationen automatisieren.
 
-Empfohlener Ablauf:
-1) Google Cloud SDK installieren (`gcloud`, `bq`)
-2) Auth konfigurieren (`gcloud auth login` und/oder Service Account)
-3) Default Project setzen
-4) SQL/JOBS aus `bigquery/` per Skript ausfuehren
+Kernkommandos:
+1) CLI installieren (WSL/Linux)  
+`./scripts/bigquery/install_gcloud_cli_wsl.sh`
+2) Auth + Projekt setzen  
+`./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>`
+3) Setup pruefen  
+`./scripts/bigquery/check_bq_setup.sh`
+4) Pipeline laufen lassen  
+`./scripts/bigquery/run_bigquery_pipeline.sh --project <gcp_project_id>`
 
-## Power BI
+## Power BI REST API
 
-### Was direkt automatisierbar ist
-- Service-seitig per Power BI REST API (Datasets, Refresh, Deployment)
-- Modell-/Berichtsdefinitionen als Dateien ueber PBIP/TMDL im Repo versionieren
+Ziel: Workspaces/Datasets/Refreshes ueber API steuern.
 
-### Was nicht direkt automatisierbar ist
-- Power BI Desktop selbst hat keinen vollwertigen offiziellen CLI-Workflow,
-  mit dem man die GUI hier fernsteuern kann.
+Voraussetzungen:
+1) Entra App Registration (Client ID + Secret)
+2) Service Principal in Power BI Tenant Settings erlauben
+3) Service Principal im Ziel-Workspace berechtigen
 
-## Empfohlener Team-Workflow fuer dieses Projekt
+Kernkommandos:
+1) Workspaces anzeigen  
+`./scripts/powerbi/run_powerbi_api.sh list-workspaces`
+2) Datasets eines Workspaces anzeigen  
+`./scripts/powerbi/run_powerbi_api.sh list-datasets --workspace-id <workspace_id>`
+3) Dataset Refresh triggern  
+`./scripts/powerbi/run_powerbi_api.sh trigger-refresh --workspace-id <workspace_id> --dataset-id <dataset_id>`
 
-1) Semantik im Repo pflegen (TMDL, Power Query M, DAX)
-2) Desktop fuer Layout/Visual-Feinschliff verwenden
-3) Service-Deploy und Refresh ueber API/Skripte automatisieren
-4) Jede fachliche Aenderung als Commit + Push festhalten
+Hinweis: Power BI Desktop selbst hat keinen offiziellen Remote-CLI-Modus.
+Automatisierung laeuft service-seitig ueber REST API.
+
+## Quellen-Setup (Kickbase + LigaInsider)
+
+Kickbase Auth pruefen:
+`./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
+
+Private Ingestion mit LigaInsider URL:
+`./scripts/run_private_ingestion.sh --env-file .env`
+
+Relevante Variablen:
+- `KICKBASE_*` fuer Auth + API Pfade
+- `LIGAINSIDER_STATUS_URL` fuer live scrape
+- `LIGAINSIDER_STATUS_FILE` als optionaler Fallback

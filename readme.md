@@ -79,6 +79,8 @@ Power BI Visuals:
 - docs/start_plan.md
 - docs/external_tools.md
 - docs/setup_databricks_bigquery.md
+- docs/setup_powerbi_api.md
+- docs/setup_sources_private.md
 
 ---
 
@@ -153,28 +155,38 @@ Siehe docs/architecture.md für die vollständige Struktur.
    `python3 -m venv .venv && source .venv/bin/activate`
 2) Demo-Ingestion ausführen  
    `./scripts/run_demo_ingestion.sh`
-3) Private-Ingestion ausführen (`.env` erforderlich)  
+3) Kickbase API Auth prüfen (`.env` erforderlich)  
+   `./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
+4) LigaInsider Scrape prüfen (`.env` erforderlich)  
+   `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
+5) Private-Ingestion ausführen (`.env` erforderlich)  
    `./scripts/run_private_ingestion.sh --env-file .env`
-4) Scheduler ausführen (z.B. alle 30 Minuten)  
+6) Scheduler ausführen (z.B. alle 30 Minuten)  
    `./scripts/run_scheduler.sh --mode private --interval-seconds 1800`
-5) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
+7) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
    `./scripts/run_databricks_jobs_demo.sh`
-6) MARTS lokal erzeugen (bewertbarer Output)  
+8) MARTS lokal erzeugen (bewertbarer Output)  
    `./scripts/run_build_marts_local.sh`
-7) End-to-End in einem Lauf  
+9) End-to-End in einem Lauf  
    `./scripts/run_pipeline_demo.sh`
-8) Backtesting-Report erzeugen  
+10) Backtesting-Report erzeugen  
    `./scripts/run_backtesting.sh`
-9) Tests ausführen  
+11) Tests ausführen  
    `./scripts/test.sh`
-10) Lint/Compile-Check  
+12) Lint/Compile-Check  
    `./scripts/lint.sh`
-11) Bronze-Outputs prüfen  
+13) Bronze-Outputs prüfen  
    `data/bronze/*.ndjson`
-12) Externe Toolchain prüfen  
+14) Externe Toolchain prüfen  
    `./scripts/check_external_tools.sh`
-13) Databricks + BigQuery Setup (Step-by-Step)  
+15) Databricks + BigQuery Setup (Step-by-Step)  
    `docs/setup_databricks_bigquery.md`
+16) BigQuery CLI installieren/authentifizieren (WSL)  
+   `./scripts/bigquery/install_gcloud_cli_wsl.sh`  
+   `./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>`  
+   `./scripts/bigquery/check_bq_setup.sh`
+17) Power BI API Setup (Service Principal)  
+   `docs/setup_powerbi_api.md`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
 
@@ -192,10 +204,22 @@ BigQuery RAW Exporte (fuer Upload) liegen in:
 - `data/warehouse/raw/manifest.json`
 
 BigQuery CLI Runner:
+- `./scripts/bigquery/install_gcloud_cli_wsl.sh`
+- `./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>`
+- `./scripts/bigquery/check_bq_setup.sh`
 - `./scripts/bigquery/run_prepare_raw_exports.sh`
 - `./scripts/bigquery/run_load_raw_bq.sh --project <gcp_project_id>`
 - `./scripts/bigquery/run_apply_views_bq.sh --project <gcp_project_id>`
 - `./scripts/bigquery/run_bigquery_pipeline.sh --project <gcp_project_id>`
+
+Source Connectivity Checks:
+- `./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
+- `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
+
+Power BI API Runner:
+- `./scripts/powerbi/run_powerbi_api.sh list-workspaces`
+- `./scripts/powerbi/run_powerbi_api.sh list-datasets --workspace-id <workspace_id>`
+- `./scripts/powerbi/run_powerbi_api.sh trigger-refresh --workspace-id <workspace_id> --dataset-id <dataset_id>`
 
 Databricks Repo/Job Runner:
 - `python3 -m scripts.databricks.sync_repo --repo-path \"/Repos/<user>/kickbase-analyzer\" --branch main`

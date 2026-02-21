@@ -130,12 +130,17 @@ sudo apt-get update
 sudo apt-get install -y google-cloud-cli
 ```
 
+Projekt-Skript (WSL, ohne apt):
+
+```bash
+./scripts/bigquery/install_gcloud_cli_wsl.sh
+```
+
 ### 4.2 Auth setzen
 Interaktiv:
 
 ```bash
-gcloud auth login
-gcloud config set project <gcp_project_id>
+./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>
 ```
 
 Service Account (CI/Automation):
@@ -148,7 +153,7 @@ gcloud config set project <gcp_project_id>
 ### 4.3 bq pruefen
 
 ```bash
-bq version
+./scripts/bigquery/check_bq_setup.sh
 ```
 
 ## 5) Kickbase Output nach BigQuery laden
