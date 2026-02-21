@@ -28,6 +28,8 @@ dist/
 data/bronze/*.ndjson
 data/bronze/*.json
 data/cache/
+data/lakehouse/
+data/marts/
 
 # OS/editor
 .DS_Store

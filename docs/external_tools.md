@@ -2,10 +2,15 @@
 
 ## Aktueller Status in dieser Umgebung
 
-- `databricks` CLI: nicht installiert
+- `databricks` Linux CLI: nicht installiert
 - `bq` CLI: nicht installiert
 - `gcloud` CLI: nicht installiert
 - `pwsh` (PowerShell): nicht installiert
+
+Zusatzbefund:
+- Eine Windows-Databricks-CLI ist vorhanden: `C:\\Users\\basti\\AppData\\Local\\DatabricksCLI\\databricks.exe`
+- Eine Databricks-Auth-Konfiguration ist vorhanden: `C:\\Users\\basti\\.databrickscfg`
+- In dieser WSL-Sitzung lassen sich Windows-Binaries jedoch aktuell nicht ausführen (Interop-Fehler), daher ist die vorhandene Windows-CLI hier nicht nutzbar.
 
 ## Databricks (CLI)
 

@@ -35,9 +35,20 @@ dev = [
 [project.scripts]
 kickbase-ingestion = "local_ingestion.runners.run_ingestion:main"
 kickbase-ingestion-scheduler = "local_ingestion.runners.run_scheduler:main"
+kickbase-bronze-ingest = "databricks.jobs.bronze_ingest.run_bronze_ingest:main"
+kickbase-silver-sync = "databricks.jobs.silver_sync.run_silver_sync:main"
+kickbase-gold-features = "databricks.jobs.gold_features.run_gold_features:main"
+kickbase-build-marts = "bigquery.marts.build_marts_local:main"
 
 [tool.setuptools]
 packages = [
+  "databricks",
+  "databricks.jobs",
+  "databricks.jobs.bronze_ingest",
+  "databricks.jobs.silver_sync",
+  "databricks.jobs.gold_features",
+  "bigquery",
+  "bigquery.marts",
   "local_ingestion",
   "local_ingestion.core",
   "local_ingestion.runners",

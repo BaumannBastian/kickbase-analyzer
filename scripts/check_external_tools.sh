@@ -25,3 +25,11 @@ check_tool databricks
 check_tool bq
 check_tool gcloud
 check_tool pwsh
+
+if [ -f "/mnt/c/Users/basti/.databrickscfg" ]; then
+  echo "[INFO] Found Windows Databricks config: /mnt/c/Users/basti/.databrickscfg"
+fi
+
+if [ -x "/mnt/c/Users/basti/AppData/Local/DatabricksCLI/databricks.exe" ]; then
+  echo "[INFO] Found Windows Databricks CLI: /mnt/c/Users/basti/AppData/Local/DatabricksCLI/databricks.exe"
+fi

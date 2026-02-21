@@ -300,20 +300,20 @@ kickbase-analyzer/
 - [x] Bronze file writer + run metadata
 
 ### MVP-2 (Databricks bronze/silver/gold jobs)
-- [ ] Bronze ingest job: load raw files to Delta
-- [ ] Silver sync job: identity + canonical tables
-- [ ] Gold job: feature tables + points_components skeleton
+- [x] Bronze ingest job: load raw files to Delta (lokales Job-Skeleton + Lakehouse Bronze Snapshot Layout)
+- [x] Silver sync job: identity + canonical tables (lokales Job-Skeleton)
+- [x] Gold job: feature tables + points_components skeleton (lokales Job-Skeleton)
 
 ### MVP-3 (local ML baseline + backtesting)
-- [ ] StartProbability baseline (ensemble of signals)
-- [ ] ExpectedPointsNextMatchday baseline + breakdown table
+- [x] StartProbability baseline (regelbasiertes Baseline-Modell im Gold-Job)
+- [x] ExpectedPointsNextMatchday baseline + breakdown table
 - [ ] Risk via simple Monte Carlo
 - [ ] Backtesting harness (matchday aligned)
 
 ### MVP-4 (BigQuery + Power BI)
 - [ ] RAW loader
 - [ ] CORE transformations
-- [ ] MARTS views
+- [x] MARTS views (lokaler Prototype-Builder aus Gold-Snapshots)
 - [ ] Power BI dashboards v0 (leaderboard + breakdown + MW + risk)
 
 ### v1+

@@ -156,16 +156,27 @@ Siehe docs/architecture.md für die vollständige Struktur.
    `./scripts/run_private_ingestion.sh --env-file .env`
 4) Scheduler ausführen (z.B. alle 30 Minuten)  
    `./scripts/run_scheduler.sh --mode private --interval-seconds 1800`
-5) Tests ausführen  
+5) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
+   `./scripts/run_databricks_jobs_demo.sh`
+6) MARTS lokal erzeugen (bewertbarer Output)  
+   `./scripts/run_build_marts_local.sh`
+7) End-to-End in einem Lauf  
+   `./scripts/run_pipeline_demo.sh`
+8) Tests ausführen  
    `./scripts/test.sh`
-6) Lint/Compile-Check  
+9) Lint/Compile-Check  
    `./scripts/lint.sh`
-7) Bronze-Outputs prüfen  
+10) Bronze-Outputs prüfen  
    `data/bronze/*.ndjson`
-8) Externe Toolchain prüfen  
+11) Externe Toolchain prüfen  
    `./scripts/check_external_tools.sh`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
+
+Bewertbarer Output (Demo) liegt nach Pipeline-Run in:
+- `data/marts/mart_player_leaderboard_<timestamp>.csv`
+- `data/marts/mart_points_breakdown_<timestamp>.csv`
+- `data/marts/mart_risk_overview_<timestamp>.csv`
 
 ---
 

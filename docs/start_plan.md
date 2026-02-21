@@ -35,12 +35,12 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - Telemetrie in `ingestion_runs.ndjson` vorhanden
 - Fehlerfaelle getestet (Auth fail, timeout)
 
-## Sprint C
+## Sprint C (in Umsetzung)
 
 ### Deliverables
-- Databricks Job Skeleton: bronze_ingest, silver_sync, gold_features
-- Erste Silver Tables (dim_player, map_player_source)
-- Erste Gold Feature Table (feat_player_daily)
+- [x] Databricks Job Skeleton: bronze_ingest, silver_sync, gold_features
+- [x] Erste Silver Tables (dim_player, map_player_source)
+- [x] Erste Gold Feature Table (feat_player_daily)
 
 ### Definition of Done
 - Job-Pipeline einmal end-to-end auf Demo-Daten erfolgreich
@@ -70,5 +70,5 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - Doku und technische Entscheidungen nachziehen
 
 ## Heute naechster Schritt
-1) Private-Mode gegen echte `.env` verifizieren
-2) Danach Databricks Bronze ingest skeleton starten
+1) BigQuery RAW/CORE Loader aufsetzen
+2) Danach Risk-Monte-Carlo + Backtesting Harness
