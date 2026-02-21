@@ -120,6 +120,24 @@ class LigaInsiderScraperTests(unittest.TestCase):
         self.assertEqual(by_slug["max-beispiel"]["predicted_lineup"], "starter")
         self.assertEqual(by_slug["luca-test"]["predicted_lineup"], "bench")
 
+    def test_parse_rows_from_team_page_without_bench_marker(self) -> None:
+        html_text = """
+        <div class="player_position_row text-center">
+          <div class="player_position_photo">
+            <a href="/gregor-kobel_9357/"><img alt="" /></a>
+          </div>
+          <div class="player_position_photo">
+            <a href="/julian-brandt_1111/"><img alt="" /></a>
+          </div>
+        </div>
+        <div class="league_name_holder"></div>
+        """
+        rows = LigaInsiderScraper.parse_status_rows(html_text)
+        self.assertEqual(len(rows), 2)
+        by_slug = {str(row["ligainsider_player_slug"]): row for row in rows}
+        self.assertEqual(by_slug["gregor-kobel"]["player_name"], "Gregor Kobel")
+        self.assertEqual(by_slug["julian-brandt"]["predicted_lineup"], "starter")
+
 
 if __name__ == "__main__":
     unittest.main()

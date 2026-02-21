@@ -273,15 +273,24 @@ class LigaInsiderScraper:
 
     @classmethod
     def _parse_team_page_rows(cls, html_text: str) -> list[dict[str, Any]]:
-        team_marker = '<div class="team_squad_area">'
+        team_marker = 'class="team_squad_area"'
+        league_marker = 'class="league_name_holder"'
         split_idx = html_text.find(team_marker)
+        league_idx = html_text.find(league_marker)
         start_idx = html_text.find('<div class="player_position_row')
 
-        if split_idx < 0 or start_idx < 0 or start_idx >= split_idx:
+        if start_idx < 0:
             return []
 
-        starter_fragment = html_text[start_idx:split_idx]
-        bench_fragment = html_text[split_idx:]
+        starter_end_idx = split_idx if split_idx > start_idx else league_idx
+        if starter_end_idx < 0 or starter_end_idx <= start_idx:
+            starter_end_idx = len(html_text)
+        starter_fragment = html_text[start_idx:starter_end_idx]
+
+        bench_fragment = ""
+        if split_idx > start_idx:
+            bench_end_idx = league_idx if league_idx > split_idx else len(html_text)
+            bench_fragment = html_text[split_idx:bench_end_idx]
 
         rows: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
@@ -291,6 +300,8 @@ class LigaInsiderScraper:
                 slug = link.group("slug").strip().lower()
                 body = link.group("body")
                 name = cls._extract_name_from_link_body(body)
+                if not name and slug:
+                    name = cls._name_from_slug(slug)
                 if not slug or not name:
                     continue
                 key = (slug, "")
@@ -322,6 +333,13 @@ class LigaInsiderScraper:
         text = HTML_TAG_RE.sub(" ", body)
         text = html.unescape(text).strip()
         return re.sub(r"\s+", " ", text)
+
+    @staticmethod
+    def _name_from_slug(slug: str) -> str:
+        words = [part for part in slug.replace("_", "-").split("-") if part]
+        if not words:
+            return ""
+        return " ".join(word.capitalize() for word in words)
 
     @classmethod
     def _to_row_candidate(cls, node: dict[str, Any]) -> dict[str, Any] | None:

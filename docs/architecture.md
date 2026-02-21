@@ -298,6 +298,8 @@ kickbase-analyzer/
 - [x] LigaInsider scraper: status/lineup + timestamps
 - [x] Local scheduler + rate limit + caching
 - [x] Bronze file writer + run metadata
+- [x] Kickbase League Discovery (`srvl`) + CLI check script
+- [x] LigaInsider Multi-Team-Scrape (18 Vereinsseiten) stabilisiert
 
 ### MVP-2 (Databricks bronze/silver/gold jobs)
 - [x] Bronze ingest job: load raw files to Delta (lokales Job-Skeleton + Lakehouse Bronze Snapshot Layout)

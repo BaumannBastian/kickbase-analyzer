@@ -6,7 +6,7 @@
 
 PYTHON ?= python3
 
-.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-powerbi-api
+.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-powerbi-api
 
 test:
 	./scripts/test.sh
@@ -28,6 +28,9 @@ run-scheduler:
 
 run-kickbase-auth-check:
 	./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots
+
+run-kickbase-league-discovery:
+	./scripts/run_kickbase_league_discovery.sh --env-file .env
 
 run-ligainsider-scrape-check:
 	./scripts/run_ligainsider_scrape_check.sh --env-file .env

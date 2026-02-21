@@ -34,6 +34,7 @@ class PrivateIngestionConfig:
     league_id: str
     email: str
     password: str
+    kickbase_user_agent: str
     source_version: str
     auth_path: str
     auth_email_field: str
@@ -106,24 +107,27 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
     league_id = _get_required_env("KICKBASE_LEAGUE_ID")
     email = _get_required_env("KICKBASE_EMAIL")
     password = _get_required_env("KICKBASE_PASSWORD")
+    kickbase_user_agent = (
+        os.environ.get("KICKBASE_USER_AGENT", "okhttp/4.11.0").strip() or "okhttp/4.11.0"
+    )
 
     source_version = os.environ.get("SOURCE_VERSION", "private-v1").strip() or "private-v1"
-    auth_path = os.environ.get("KICKBASE_AUTH_PATH", "/auth/login").strip() or "/auth/login"
+    auth_path = os.environ.get("KICKBASE_AUTH_PATH", "/v4/user/login").strip() or "/v4/user/login"
     auth_email_field = (
-        os.environ.get("KICKBASE_AUTH_EMAIL_FIELD", "email").strip() or "email"
+        os.environ.get("KICKBASE_AUTH_EMAIL_FIELD", "em").strip() or "em"
     )
     auth_password_field = (
-        os.environ.get("KICKBASE_AUTH_PASSWORD_FIELD", "password").strip() or "password"
+        os.environ.get("KICKBASE_AUTH_PASSWORD_FIELD", "pass").strip() or "pass"
     )
     player_snapshot_path = (
-        os.environ.get("KICKBASE_PLAYER_SNAPSHOT_PATH", "/leagues/{league_id}/players/snapshot")
+        os.environ.get("KICKBASE_PLAYER_SNAPSHOT_PATH", "/v4/leagues/{league_id}/market")
         .strip()
-        or "/leagues/{league_id}/players/snapshot"
+        or "/v4/leagues/{league_id}/market"
     )
     match_stats_path = (
-        os.environ.get("KICKBASE_MATCH_STATS_PATH", "/leagues/{league_id}/players/match-stats")
+        os.environ.get("KICKBASE_MATCH_STATS_PATH", "/v4/leagues/{league_id}/lineup")
         .strip()
-        or "/leagues/{league_id}/players/match-stats"
+        or "/v4/leagues/{league_id}/lineup"
     )
 
     retry = RetryConfig(
@@ -187,6 +191,7 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
         league_id=league_id,
         email=email,
         password=password,
+        kickbase_user_agent=kickbase_user_agent,
         source_version=source_version,
         auth_path=auth_path,
         auth_email_field=auth_email_field,

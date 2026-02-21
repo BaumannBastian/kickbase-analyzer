@@ -157,35 +157,37 @@ Siehe docs/architecture.md für die vollständige Struktur.
    `./scripts/run_demo_ingestion.sh`
 3) Kickbase API Auth prüfen (`.env` erforderlich)  
    `./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
-4) LigaInsider Scrape prüfen (`.env` erforderlich)  
+4) Kickbase League-ID ermitteln (`srvl`)  
+   `./scripts/run_kickbase_league_discovery.sh --env-file .env`
+5) LigaInsider Scrape prüfen (`.env` erforderlich)  
    `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
-5) Private-Ingestion ausführen (`.env` erforderlich)  
+6) Private-Ingestion ausführen (`.env` erforderlich)  
    `./scripts/run_private_ingestion.sh --env-file .env`
-6) Scheduler ausführen (z.B. alle 30 Minuten)  
+7) Scheduler ausführen (z.B. alle 30 Minuten)  
    `./scripts/run_scheduler.sh --mode private --interval-seconds 1800`
-7) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
+8) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
    `./scripts/run_databricks_jobs_demo.sh`
-8) MARTS lokal erzeugen (bewertbarer Output)  
+9) MARTS lokal erzeugen (bewertbarer Output)  
    `./scripts/run_build_marts_local.sh`
-9) End-to-End in einem Lauf  
+10) End-to-End in einem Lauf  
    `./scripts/run_pipeline_demo.sh`
-10) Backtesting-Report erzeugen  
+11) Backtesting-Report erzeugen  
    `./scripts/run_backtesting.sh`
-11) Tests ausführen  
+12) Tests ausführen  
    `./scripts/test.sh`
-12) Lint/Compile-Check  
+13) Lint/Compile-Check  
    `./scripts/lint.sh`
-13) Bronze-Outputs prüfen  
+14) Bronze-Outputs prüfen  
    `data/bronze/*.ndjson`
-14) Externe Toolchain prüfen  
+15) Externe Toolchain prüfen  
    `./scripts/check_external_tools.sh`
-15) Databricks + BigQuery Setup (Step-by-Step)  
+16) Databricks + BigQuery Setup (Step-by-Step)  
    `docs/setup_databricks_bigquery.md`
-16) BigQuery CLI installieren/authentifizieren (WSL)  
+17) BigQuery CLI installieren/authentifizieren (WSL)  
    `./scripts/bigquery/install_gcloud_cli_wsl.sh`  
    `./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>`  
    `./scripts/bigquery/check_bq_setup.sh`
-17) Power BI API Setup (Service Principal)  
+18) Power BI API Setup (Service Principal)  
    `docs/setup_powerbi_api.md`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
@@ -214,6 +216,7 @@ BigQuery CLI Runner:
 
 Source Connectivity Checks:
 - `./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
+- `./scripts/run_kickbase_league_discovery.sh --env-file .env`
 - `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
 
 Hinweis LigaInsider URL:

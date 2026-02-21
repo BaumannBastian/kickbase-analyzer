@@ -97,6 +97,7 @@ class KickbaseClient:
         match_stats_path: str,
         email: str,
         password: str,
+        user_agent: str = "okhttp/4.11.0",
         retry_config: RetryConfig,
         cache: JsonFileCache | None = None,
         cache_ttl_seconds: int = 300,
@@ -112,6 +113,7 @@ class KickbaseClient:
         self.match_stats_path = match_stats_path
         self.email = email
         self.password = password
+        self.user_agent = user_agent
         self.retry_config = retry_config
         self.cache = cache
         self.cache_ttl_seconds = cache_ttl_seconds
@@ -121,13 +123,18 @@ class KickbaseClient:
         self._next_request_ts = 0.0
 
     def authenticate(self) -> str:
+        auth_payload: dict[str, Any] = {
+            self.auth_email_field: self.email,
+            self.auth_password_field: self.password,
+        }
+        if self.auth_email_field == "em" and self.auth_password_field == "pass":
+            auth_payload["loy"] = False
+            auth_payload["rep"] = {}
+
         payload = self._request_json(
             method="POST",
             path=self.auth_path,
-            payload={
-                self.auth_email_field: self.email,
-                self.auth_password_field: self.password,
-            },
+            payload=auth_payload,
             token=None,
         )
 
@@ -135,6 +142,8 @@ class KickbaseClient:
             payload.get("token") if isinstance(payload, dict) else None,
             payload.get("access_token") if isinstance(payload, dict) else None,
             payload.get("jwt") if isinstance(payload, dict) else None,
+            payload.get("tkn") if isinstance(payload, dict) else None,
+            payload.get("chttkn") if isinstance(payload, dict) else None,
         ]
 
         if isinstance(payload, dict):
@@ -190,7 +199,10 @@ class KickbaseClient:
         token: str | None,
     ) -> dict[str, Any] | list[Any]:
         url = self._join_url(path)
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": self.user_agent,
+        }
         if payload is not None:
             headers["Content-Type"] = "application/json"
         if token is not None:
@@ -259,7 +271,7 @@ class KickbaseClient:
             rows = payload
         elif isinstance(payload, dict):
             rows_any = None
-            for key in ("data", "items", "players", "rows", "result"):
+            for key in ("data", "items", "players", "rows", "result", "it"):
                 candidate = payload.get(key)
                 if isinstance(candidate, list):
                     rows_any = candidate

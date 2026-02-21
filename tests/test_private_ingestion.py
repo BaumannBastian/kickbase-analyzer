@@ -74,6 +74,7 @@ class PrivateIngestionTests(unittest.TestCase):
             league_id="league-42",
             email="user@example.com",
             password="secret",
+            kickbase_user_agent="okhttp/4.11.0",
             source_version="private-test",
             auth_path="/auth/login",
             auth_email_field="email",
@@ -246,6 +247,7 @@ class PrivateIngestionTests(unittest.TestCase):
                 config = load_private_ingestion_config(env_file)
                 self.assertEqual(config.base_url, "https://api.kickbase.test")
                 self.assertEqual(config.league_id, "league-42")
+                self.assertEqual(config.kickbase_user_agent, "okhttp/4.11.0")
                 self.assertEqual(config.retry.max_retries, 3)
                 self.assertEqual(config.retry.rate_limit_seconds, 0.5)
                 self.assertIsNone(config.ligainsider_status_url)

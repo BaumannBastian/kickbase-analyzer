@@ -67,6 +67,7 @@ def run_private_ingestion(
         match_stats_path=config.match_stats_path,
         email=config.email,
         password=config.password,
+        user_agent=config.kickbase_user_agent,
         retry_config=config.retry,
         cache=cache,
         cache_ttl_seconds=config.cache_ttl_seconds,

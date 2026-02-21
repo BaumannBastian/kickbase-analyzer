@@ -63,8 +63,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_ttl_seconds=cache_ttl_seconds,
     )
 
+    all_rows: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
     try:
-        rows = scraper.fetch_status_snapshot(status_url)
+        for raw_url in status_url.split(","):
+            url = raw_url.strip()
+            if not url:
+                continue
+            rows = scraper.fetch_status_snapshot(url)
+            for row in rows:
+                key = (
+                    str(row.get("ligainsider_player_slug", "")).strip().lower(),
+                    str(row.get("player_name", "")).strip().lower(),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                all_rows.append(dict(row))
     except LigaInsiderScraperError as exc:
         print(
             json.dumps(
@@ -81,8 +96,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     summary = {
         "status": "success",
-        "row_count": len(rows),
-        "preview": rows[: max(0, args.preview)],
+        "row_count": len(all_rows),
+        "preview": all_rows[: max(0, args.preview)],
     }
     print(json.dumps(summary, ensure_ascii=True, indent=2, sort_keys=True))
     return 0

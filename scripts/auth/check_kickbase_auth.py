@@ -61,6 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         match_stats_path=config.match_stats_path,
         email=config.email,
         password=config.password,
+        user_agent=config.kickbase_user_agent,
         retry_config=config.retry,
         cache=None,
     )
