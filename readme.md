@@ -79,7 +79,7 @@ Power BI Visuals:
 - docs/start_plan.md
 - docs/external_tools.md
 - docs/setup_databricks_bigquery.md
-- docs/setup_powerbi_api.md
+- docs/setup_powerbi_desktop.md
 - docs/setup_sources_private.md
 
 ---
@@ -135,13 +135,12 @@ Lineup/Status (Kickbase + LigaInsider) adaptiv:
 
 ---
 
-## Hosting für Recruiter (privat)
-Ziel: Dashboards “private” halten (nur mit Freigabe/Passwort).
+## Dashboard-Betrieb (ohne Abo/Service-API)
+Ziel: Dashboards lokal in Power BI Desktop entwickeln und reproduzierbar halten.
 Optionen:
-- Power BI Service: Zugriff per Invite/Workspace/App (gezielte Freigabe)
-- Oder alternativ: Dashboard-Export + passwortgeschützter Link/Storage (nur Demo)
-
-Wichtig: Öffentliche Nutzung / “für alle” ist nicht Ziel dieses Projekts.
+- Power BI Desktop lokal (BigQuery MARTS als Source, manuelle Refreshes)
+- Exporte/Screenshots/PDFs fuer Portfolio-Review
+- Optional spaeter: separates Sharing-Tool fuer Recruiter
 
 ---
 
@@ -187,8 +186,8 @@ Siehe docs/architecture.md für die vollständige Struktur.
    `./scripts/bigquery/install_gcloud_cli_wsl.sh`  
    `./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>`  
    `./scripts/bigquery/check_bq_setup.sh`
-18) Power BI API Setup (Service Principal)  
-   `docs/setup_powerbi_api.md`
+18) Power BI Desktop Setup (lokal)  
+   `docs/setup_powerbi_desktop.md`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
 
@@ -223,10 +222,9 @@ Hinweis LigaInsider URL:
 - Nicht die Homepage (`https://www.ligainsider.de/`) nutzen
 - Stattdessen Team-Aufstellungsseiten (eine oder mehrere, comma-separated in `LIGAINSIDER_STATUS_URL`)
 
-Power BI API Runner:
-- `./scripts/powerbi/run_powerbi_api.sh list-workspaces`
-- `./scripts/powerbi/run_powerbi_api.sh list-datasets --workspace-id <workspace_id>`
-- `./scripts/powerbi/run_powerbi_api.sh trigger-refresh --workspace-id <workspace_id> --dataset-id <dataset_id>`
+Power BI Desktop Asset Pack:
+- `python3 -m scripts.powerbi_desktop.export_desktop_assets --project <gcp_project_id>`
+- siehe `docs/setup_powerbi_desktop.md`
 
 Databricks Repo/Job Runner:
 - `python3 -m scripts.databricks.sync_repo --repo-path \"/Repos/<user>/kickbase-analyzer\" --branch main`

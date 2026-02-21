@@ -6,7 +6,7 @@
 
 PYTHON ?= python3
 
-.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-powerbi-api
+.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-powerbi-desktop-pack
 
 test:
 	./scripts/test.sh
@@ -68,5 +68,5 @@ run-bq-views:
 run-bq-pipeline:
 	./scripts/bigquery/run_bigquery_pipeline.sh
 
-run-powerbi-api:
-	./scripts/powerbi/run_powerbi_api.sh list-workspaces
+run-powerbi-desktop-pack:
+	./scripts/run_powerbi_desktop_pack.sh

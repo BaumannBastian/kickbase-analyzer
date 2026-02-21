@@ -83,7 +83,8 @@ Orchestrierung:
 
 ### Step E — Power BI Dashboards (privat)
 - Power BI liest aus BigQuery MARTS
-- Hosting “privat”: Zugriff nur nach Freigabe/Invite/Passwort (Recruiter bekommen Zugang)
+- Dashboard-Entwicklung lokal in Power BI Desktop (ohne Service-API-Abhaengigkeit)
+- Versionierte Assets: M/DAX/TMDL Templates im Repo; lokale PBIX/PBIP Iteration in ignored paths
 
 ---
 
@@ -239,6 +240,11 @@ kickbase-analyzer/
   dashboards/
     powerbi/
       README.md
+      templates/
+        bigquery_marts_queries.pq
+        measures.dax
+        model.tmdl
+      local/                (ignored, nicht versioniert)
       screenshots/
 
   demo/
@@ -317,7 +323,7 @@ kickbase-analyzer/
 - [x] RAW loader (JSONL Export + bq CLI Upload Script)
 - [x] CORE transformations (BigQuery SQL Views + Apply Script)
 - [x] MARTS views (lokaler Prototype-Builder + BigQuery SQL Views)
-- [x] Power BI REST API helper scripts (workspaces/datasets/refresh)
+- [x] Power BI Desktop Asset-Pack (M/DAX/TMDL Templates + Export Script)
 - [ ] Power BI dashboards v0 (leaderboard + breakdown + MW + risk)
 
 ### v1+

@@ -1,5 +1,6 @@
 # ------------------------------------
 # __init__.py
 #
-# Markiert scripts/powerbi als Python-Paket.
+# Markiert scripts/powerbi_desktop als Python-Paket.
 # ------------------------------------
+

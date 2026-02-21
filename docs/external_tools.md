@@ -26,25 +26,20 @@ Kernkommandos:
 4) Pipeline laufen lassen  
 `./scripts/bigquery/run_bigquery_pipeline.sh --project <gcp_project_id>`
 
-## Power BI REST API
+## Power BI Desktop (lokal)
 
-Ziel: Workspaces/Datasets/Refreshes ueber API steuern.
+Ziel: Dashboards lokal entwickeln, basierend auf BigQuery MARTS, ohne Service API.
 
 Voraussetzungen:
-1) Entra App Registration (Client ID + Secret)
-2) Service Principal in Power BI Tenant Settings erlauben
-3) Service Principal im Ziel-Workspace berechtigen
+1) Power BI Desktop lokal installiert
+2) BigQuery Zugriff fuer das genutzte Google-Konto
+3) BigQuery MARTS gebaut (`kickbase_marts`)
 
 Kernkommandos:
-1) Workspaces anzeigen  
-`./scripts/powerbi/run_powerbi_api.sh list-workspaces`
-2) Datasets eines Workspaces anzeigen  
-`./scripts/powerbi/run_powerbi_api.sh list-datasets --workspace-id <workspace_id>`
-3) Dataset Refresh triggern  
-`./scripts/powerbi/run_powerbi_api.sh trigger-refresh --workspace-id <workspace_id> --dataset-id <dataset_id>`
-
-Hinweis: Power BI Desktop selbst hat keinen offiziellen Remote-CLI-Modus.
-Automatisierung laeuft service-seitig ueber REST API.
+1) M/DAX/TMDL Asset-Pack exportieren  
+`python -m scripts.powerbi_desktop.export_desktop_assets --project <gcp_project_id>`
+2) Detaillierte Desktop-Anleitung  
+`docs/setup_powerbi_desktop.md`
 
 ## Quellen-Setup (Kickbase + LigaInsider)
 

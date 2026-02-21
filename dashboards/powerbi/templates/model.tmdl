@@ -1,0 +1,33 @@
+// ------------------------------------
+// model.tmdl
+//
+// TMDL-Template fuer ein lokales Power-BI-Desktop/PBIP-Modell.
+// Platzhalter fuer Projekt und Dataset werden beim Export ersetzt.
+// ------------------------------------
+
+createOrReplace
+
+	ref table mart_player_leaderboard
+		measure 'Players' = DISTINCTCOUNT(mart_player_leaderboard[player_uid])
+		measure 'Avg Expected Points' = AVERAGE(mart_player_leaderboard[expected_points_next_matchday])
+		measure 'Avg Start Probability' = AVERAGE(mart_player_leaderboard[start_probability])
+		measure 'Avg Value Score' = AVERAGE(mart_player_leaderboard[value_score])
+		measure 'Total Market Value' = SUM(mart_player_leaderboard[market_value])
+		measure 'Avg Expected MV Delta 7d' = AVERAGE(mart_player_leaderboard[expected_marketvalue_change_7d])
+
+	ref table mart_points_breakdown
+		measure 'Total Predicted Points' = SUM(mart_points_breakdown[pred_total])
+		measure 'Total Base EV' = SUM(mart_points_breakdown[base_raw_ev])
+		measure 'Total Scorer EV' = SUM(mart_points_breakdown[scorer_ev])
+		measure 'Total Win EV' = SUM(mart_points_breakdown[win_ev])
+		measure 'Total Minutes EV' = SUM(mart_points_breakdown[minutes_bonus_ev])
+		measure 'Total Cards EV' = SUM(mart_points_breakdown[cards_negative_ev])
+
+	ref table mart_risk_overview
+		measure 'Avg P_DNP' = AVERAGE(mart_risk_overview[p_dnp])
+		measure 'Avg StdDev Points' = AVERAGE(mart_risk_overview[stddev_points])
+		measure 'Avg P90 Minus P10' = AVERAGEX(mart_risk_overview, mart_risk_overview[p90_points] - mart_risk_overview[p10_points])
+
+	annotation TemplateProject = "{project}"
+	annotation TemplateMartsDataset = "{marts}"
+

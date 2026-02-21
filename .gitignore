@@ -34,6 +34,12 @@ data/marts/
 data/backtesting/
 data/warehouse/
 
+# Power BI Desktop local artifacts
+dashboards/powerbi/local/**
+!dashboards/powerbi/local/.gitkeep
+dashboards/powerbi/**/*.pbix
+dashboards/powerbi/**/*.pbit
+
 # OS/editor
 .DS_Store
 .vscode/

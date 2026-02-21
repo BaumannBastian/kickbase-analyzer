@@ -58,8 +58,9 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - [x] BigQuery RAW Loader + CORE/MARTS View-Skripte
 - [x] BigQuery CLI Setup Skripte (Install/Auth/Check)
 - [x] Backtesting Harness (matchday aligned)
-- [x] Power BI REST API Skripte (Workspace/Dataset/Refresh)
+- [x] Power BI Desktop Asset-Pack (M/DAX/TMDL Templates + Export Script)
 - [ ] BigQuery MARTS v0 mit echten Cloud-Runs
+- [ ] Power BI Dashboard v0 in Desktop auf MARTS finalisieren
 
 ### Definition of Done
 - Backtesting Report fuer mindestens eine historische Periode
@@ -79,4 +80,4 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 
 ## Heute naechster Schritt
 1) BigQuery Cloud-Run mit echtem Projekt testen
-2) Danach Power BI Dashboard v0 auf MARTS finalisieren
+2) Danach Power BI Desktop Dashboard v0 auf MARTS finalisieren

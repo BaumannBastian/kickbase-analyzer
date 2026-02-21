@@ -2,8 +2,9 @@
 # ------------------------------------
 # check_external_tools.sh
 #
-# Prueft, ob externe CLIs fuer Databricks, BigQuery und Power BI
+# Prueft, ob externe CLIs fuer Databricks und BigQuery
 # in der aktuellen Shell verfuegbar sind.
+# Meldet optional gefundene lokale Power-BI-Desktop-Installationen.
 #
 # Usage
 # ------------------------------------
@@ -25,7 +26,6 @@ check_tool() {
 check_tool databricks
 check_tool bq
 check_tool gcloud
-check_tool pwsh
 
 if [ -f "/mnt/c/Users/basti/.databrickscfg" ]; then
   echo "[INFO] Found Windows Databricks config: /mnt/c/Users/basti/.databrickscfg"
@@ -33,4 +33,12 @@ fi
 
 if [ -x "/mnt/c/Users/basti/AppData/Local/DatabricksCLI/databricks.exe" ]; then
   echo "[INFO] Found Windows Databricks CLI: /mnt/c/Users/basti/AppData/Local/DatabricksCLI/databricks.exe"
+fi
+
+if [ -x "/mnt/c/Program Files/Microsoft Power BI Desktop/bin/PBIDesktop.exe" ]; then
+  echo "[INFO] Found Power BI Desktop: /mnt/c/Program Files/Microsoft Power BI Desktop/bin/PBIDesktop.exe"
+fi
+
+if [ -x "/mnt/c/Users/basti/AppData/Local/Microsoft/WindowsApps/PBIDesktop.exe" ]; then
+  echo "[INFO] Found Power BI Desktop (Store): /mnt/c/Users/basti/AppData/Local/Microsoft/WindowsApps/PBIDesktop.exe"
 fi
