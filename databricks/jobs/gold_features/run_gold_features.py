@@ -76,6 +76,8 @@ def _start_probability(status: str, lineup: str, competition_risk: str) -> float
     }
     lineup_shift = {
         "starter": 0.10,
+        "safe starter": 0.12,
+        "potential starter": 0.04,
         "bench": -0.18,
     }
     risk_shift = {

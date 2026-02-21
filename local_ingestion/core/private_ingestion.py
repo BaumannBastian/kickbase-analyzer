@@ -237,7 +237,6 @@ def run_private_ingestion(
     )
     ligainsider_rows = build_ligainsider_rows(
         raw_rows=ligainsider_rows,
-        kickbase_rows=kickbase_players,
         previous_rows=previous_ligainsider_rows,
     )
 

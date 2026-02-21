@@ -20,6 +20,7 @@ class LigaInsiderBronzeBuilderTests(unittest.TestCase):
         raw_rows = [
             {
                 "ligainsider_player_slug": "harry-kane",
+                "ligainsider_player_id": "4828",
                 "player_name": "Harry Kane",
                 "predicted_lineup": "starter",
                 "status": "unknown",
@@ -28,6 +29,7 @@ class LigaInsiderBronzeBuilderTests(unittest.TestCase):
             },
             {
                 "ligainsider_player_slug": "luis-diaz",
+                "ligainsider_player_id": "22566",
                 "player_name": "Luis Diaz",
                 "predicted_lineup": "starter",
                 "status": "unknown",
@@ -36,41 +38,43 @@ class LigaInsiderBronzeBuilderTests(unittest.TestCase):
             },
         ]
 
-        kickbase_rows = [
-            {
-                "kickbase_player_id": "7226",
-                "player_name": "Harry Kane",
-                "team_id": "1",
-                "position_code": 4,
-                "position": "FWD",
-                "injury_status": "fit",
-                "market_value": 10_000_000,
-            },
-            {
-                "kickbase_player_id": "11675",
-                "player_name": "Luis Diaz",
-                "team_id": "1",
-                "position_code": 4,
-                "position": "FWD",
-                "injury_status": "fit",
-                "market_value": 9_000_000,
-            },
-        ]
-
         rows = build_ligainsider_rows(
             raw_rows=raw_rows,
-            kickbase_rows=kickbase_rows,
             previous_rows=[],
         )
         by_slug = {str(row["ligainsider_player_slug"]): row for row in rows}
         kane = by_slug["harry-kane"]
-        self.assertEqual(kane["competition_scope"], "ligainsider_column")
         self.assertEqual(kane["competition_player_count"], 2)
         self.assertEqual(
             kane["competition_player_names"],
             ["Luis Diaz", "Nicolas Jackson"],
         )
-        self.assertTrue(kane["has_position_competition"])
+        self.assertEqual(kane["predicted_lineup"], "Potential Starter")
+
+    def test_lineup_bench_and_safe_starter_mapping(self) -> None:
+        raw_rows = [
+            {
+                "ligainsider_player_slug": "starter-safe",
+                "ligainsider_player_id": "100",
+                "player_name": "Starter Safe",
+                "predicted_lineup": "starter",
+                "status": "fit",
+                "competition_player_names": [],
+            },
+            {
+                "ligainsider_player_slug": "bench-player",
+                "ligainsider_player_id": "101",
+                "player_name": "Bench Player",
+                "predicted_lineup": "bench",
+                "status": "fit",
+                "competition_player_names": ["Any Competitor"],
+            },
+        ]
+
+        rows = build_ligainsider_rows(raw_rows=raw_rows, previous_rows=[])
+        by_slug = {str(row["ligainsider_player_slug"]): row for row in rows}
+        self.assertEqual(by_slug["starter-safe"]["predicted_lineup"], "Safe Starter")
+        self.assertEqual(by_slug["bench-player"]["predicted_lineup"], "Bench")
 
 
 if __name__ == "__main__":

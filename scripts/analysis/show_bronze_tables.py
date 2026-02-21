@@ -52,15 +52,12 @@ KB_COLUMNS = [
 
 LI_COLUMNS = [
     "ligainsider_player_slug",
+    "ligainsider_player_id",
     "player_name",
     "predicted_lineup",
-    "is_in_lineup",
-    "has_position_competition",
-    "competition_scope",
     "competition_player_count",
     "competition_player_names",
     "status",
-    "kickbase_player_id",
     "last_changed_at",
 ]
 
