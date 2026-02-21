@@ -13,6 +13,8 @@
 # - client = KickbaseClient(...)
 # - token = client.authenticate()
 # - rows = client.fetch_player_snapshot(token, league_id)
+# - competition_players = client.fetch_all_competition_players(...)
+# - details = client.fetch_player_details(token, league_id, player_id)
 # ------------------------------------
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import json
 import time
 from typing import Any, Protocol
 from urllib import error, request
+from urllib.parse import urlencode
 
 from local_ingestion.core.cache import JsonFileCache
 from local_ingestion.core.config import RetryConfig
@@ -94,7 +97,12 @@ class KickbaseClient:
         auth_email_field: str = "email",
         auth_password_field: str = "password",
         player_snapshot_path: str,
-        match_stats_path: str,
+        competition_players_search_path: str = "",
+        match_stats_path: str = "",
+        player_details_path: str = "",
+        player_market_value_history_path: str = "",
+        player_performance_path: str = "",
+        player_transfers_path: str = "",
         email: str,
         password: str,
         user_agent: str = "okhttp/4.11.0",
@@ -110,7 +118,12 @@ class KickbaseClient:
         self.auth_email_field = auth_email_field
         self.auth_password_field = auth_password_field
         self.player_snapshot_path = player_snapshot_path
+        self.competition_players_search_path = competition_players_search_path
         self.match_stats_path = match_stats_path
+        self.player_details_path = player_details_path
+        self.player_market_value_history_path = player_market_value_history_path
+        self.player_performance_path = player_performance_path
+        self.player_transfers_path = player_transfers_path
         self.email = email
         self.password = password
         self.user_agent = user_agent
@@ -121,6 +134,7 @@ class KickbaseClient:
         self._sleep_fn = sleep_fn or time.sleep
         self._now_fn = now_fn or time.monotonic
         self._next_request_ts = 0.0
+        self._last_auth_payload: dict[str, Any] | None = None
 
     def authenticate(self) -> str:
         auth_payload: dict[str, Any] = {
@@ -137,6 +151,7 @@ class KickbaseClient:
             payload=auth_payload,
             token=None,
         )
+        self._last_auth_payload = payload if isinstance(payload, dict) else None
 
         token_candidates = [
             payload.get("token") if isinstance(payload, dict) else None,
@@ -163,13 +178,158 @@ class KickbaseClient:
 
         raise KickbaseAuthError("Authentication response did not contain a token")
 
+    def discover_competition_id(self, *, league_id: str) -> str | None:
+        payload = self._last_auth_payload
+        if not isinstance(payload, dict):
+            return None
+
+        leagues = payload.get("srvl")
+        if not isinstance(leagues, list):
+            return None
+
+        league_id_text = str(league_id).strip()
+        for item in leagues:
+            if not isinstance(item, dict):
+                continue
+            item_league_id = str(item.get("id", "")).strip()
+            if item_league_id != league_id_text:
+                continue
+            competition_id = item.get("cpi") or item.get("competition_id") or item.get("competitionId")
+            if competition_id is None:
+                return None
+            competition_text = str(competition_id).strip()
+            if competition_text:
+                return competition_text
+        return None
+
     def fetch_player_snapshot(self, *, token: str, league_id: str) -> list[dict[str, Any]]:
         path = self.player_snapshot_path.format(league_id=league_id)
         return self._fetch_list(path=path, token=token, cache_key=f"player_snapshot:{league_id}")
 
+    def fetch_competition_players_page(
+        self,
+        *,
+        token: str,
+        competition_id: str,
+        league_id: str,
+        query: str,
+        start: int,
+        page_size: int,
+    ) -> list[dict[str, Any]]:
+        if not self.competition_players_search_path.strip():
+            return []
+
+        base_path = self.competition_players_search_path.format(competition_id=competition_id)
+        query_params = urlencode(
+            {
+                "leagueId": league_id,
+                "query": query,
+                "start": max(0, start),
+                "max": max(1, page_size),
+            }
+        )
+        separator = "&" if "?" in base_path else "?"
+        path = f"{base_path}{separator}{query_params}"
+        cache_key = (
+            f"competition_players:{competition_id}:{league_id}:"
+            f"{query}:{max(0, start)}:{max(1, page_size)}"
+        )
+        return self._fetch_list(path=path, token=token, cache_key=cache_key)
+
+    def fetch_all_competition_players(
+        self,
+        *,
+        token: str,
+        competition_id: str,
+        league_id: str,
+        query: str,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        players: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        max_pages = 50
+
+        for page_index in range(max_pages):
+            start = page_index * max(1, page_size)
+            page_rows = self.fetch_competition_players_page(
+                token=token,
+                competition_id=competition_id,
+                league_id=league_id,
+                query=query,
+                start=start,
+                page_size=page_size,
+            )
+            if not page_rows:
+                break
+
+            for row in page_rows:
+                player_id = self._extract_player_id(row)
+                if player_id and player_id in seen_ids:
+                    continue
+                if player_id:
+                    seen_ids.add(player_id)
+                players.append(row)
+
+            if len(page_rows) < page_size:
+                break
+
+        return players
+
     def fetch_match_stats(self, *, token: str, league_id: str) -> list[dict[str, Any]]:
+        if not self.match_stats_path.strip():
+            return []
         path = self.match_stats_path.format(league_id=league_id)
         return self._fetch_list(path=path, token=token, cache_key=f"match_stats:{league_id}")
+
+    def fetch_player_details(
+        self, *, token: str, league_id: str, player_id: str
+    ) -> dict[str, Any]:
+        if not self.player_details_path.strip():
+            return {}
+        path = self.player_details_path.format(league_id=league_id, player_id=player_id)
+        payload = self._fetch_optional_payload(
+            path=path,
+            token=token,
+            cache_key=f"player_details:{league_id}:{player_id}",
+        )
+        return self._extract_object(payload)
+
+    def fetch_player_market_value_history(
+        self, *, token: str, player_id: str
+    ) -> list[dict[str, Any]]:
+        if not self.player_market_value_history_path.strip():
+            return []
+        path = self.player_market_value_history_path.format(player_id=player_id)
+        payload = self._fetch_optional_payload(
+            path=path,
+            token=token,
+            cache_key=f"player_market_values:{player_id}",
+        )
+        return self._extract_rows_or_empty(payload)
+
+    def fetch_player_performance(self, *, token: str, player_id: str) -> dict[str, Any]:
+        if not self.player_performance_path.strip():
+            return {}
+        path = self.player_performance_path.format(player_id=player_id)
+        payload = self._fetch_optional_payload(
+            path=path,
+            token=token,
+            cache_key=f"player_performance:{player_id}",
+        )
+        return self._extract_object(payload)
+
+    def fetch_player_transfers(
+        self, *, token: str, league_id: str, player_id: str
+    ) -> list[dict[str, Any]]:
+        if not self.player_transfers_path.strip():
+            return []
+        path = self.player_transfers_path.format(league_id=league_id, player_id=player_id)
+        payload = self._fetch_optional_payload(
+            path=path,
+            token=token,
+            cache_key=f"player_transfers:{league_id}:{player_id}",
+        )
+        return self._extract_rows_or_empty(payload)
 
     def _fetch_list(self, *, path: str, token: str, cache_key: str) -> list[dict[str, Any]]:
         if self.cache is not None:
@@ -183,6 +343,25 @@ class KickbaseClient:
         if self.cache is not None:
             self.cache.set(cache_key, rows)
         return rows
+
+    def _fetch_optional_payload(
+        self, *, path: str, token: str, cache_key: str
+    ) -> dict[str, Any] | list[Any]:
+        if self.cache is not None:
+            cached = self.cache.get(cache_key, ttl_seconds=self.cache_ttl_seconds)
+            if cached is not None:
+                return cached
+
+        try:
+            payload = self._request_json(method="GET", path=path, payload=None, token=token)
+        except KickbaseAuthError:
+            raise
+        except KickbaseRequestError:
+            payload = {}
+
+        if self.cache is not None:
+            self.cache.set(cache_key, payload)
+        return payload
 
     def _apply_rate_limit(self) -> None:
         now = float(self._now_fn())
@@ -290,3 +469,37 @@ class KickbaseClient:
                 )
             out.append(row)
         return out
+
+    def _extract_rows_or_empty(self, payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+
+        if isinstance(payload, dict):
+            for key in ("data", "items", "players", "rows", "result", "it", "history", "transfers"):
+                candidate = payload.get(key)
+                if isinstance(candidate, list):
+                    return [row for row in candidate if isinstance(row, dict)]
+            return []
+
+        return []
+
+    def _extract_object(self, payload: dict[str, Any] | list[Any]) -> dict[str, Any]:
+        if isinstance(payload, dict):
+            for key in ("data", "item", "player", "result", "it"):
+                candidate = payload.get(key)
+                if isinstance(candidate, dict):
+                    return candidate
+            return payload
+
+        return {}
+
+    @staticmethod
+    def _extract_player_id(row: dict[str, Any]) -> str:
+        for key in ("kickbase_player_id", "player_id", "id", "i", "pi"):
+            value = row.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""

@@ -58,6 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         auth_email_field=config.auth_email_field,
         auth_password_field=config.auth_password_field,
         player_snapshot_path=config.player_snapshot_path,
+        competition_players_search_path=config.competition_players_search_path,
         match_stats_path=config.match_stats_path,
         email=config.email,
         password=config.password,
@@ -89,9 +90,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "token_prefix": token[:8],
     }
 
+    competition_id = config.competition_id or client.discover_competition_id(league_id=config.league_id)
+    summary["competition_id"] = competition_id
+
     if args.verify_snapshots:
         try:
-            players = client.fetch_player_snapshot(token=token, league_id=config.league_id)
+            competition_players: list[dict[str, object]] = []
+            if competition_id:
+                competition_players = client.fetch_all_competition_players(
+                    token=token,
+                    competition_id=competition_id,
+                    league_id=config.league_id,
+                    query=config.competition_players_query,
+                    page_size=config.competition_players_page_size,
+                )
+            players = competition_players or client.fetch_player_snapshot(
+                token=token,
+                league_id=config.league_id,
+            )
             match_stats = client.fetch_match_stats(token=token, league_id=config.league_id)
         except KickbaseClientError as exc:
             print(
@@ -109,6 +125,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
 
         summary["stage"] = "snapshot_fetch"
+        summary["player_source"] = "competition_players" if competition_players else "league_market"
+        summary["competition_player_rows"] = len(competition_players)
         summary["player_rows"] = len(players)
         summary["match_stats_rows"] = len(match_stats)
 

@@ -59,7 +59,6 @@ Konsequenz:
 
 Output: **Raw Staging Files** (JSON/NDJSON/Parquet), versioniert + timestamped:
 - kickbase_player_snapshot_YYYY-MM-DDTHHMMSS.json
-- kickbase_match_stats_YYYY-MM-DDTHHMMSS.json
 - ligainsider_status_snapshot_YYYY-MM-DDTHHMMSS.json
 
 ### Step B — Databricks Lakehouse: Bronze → Silver → Gold
@@ -93,7 +92,6 @@ Orchestrierung:
 ### 4.1 Bronze (Raw, append-only)
 Ziel: Nichts verlieren. Alles ist zeitlich nachvollziehbar (Backtesting).
 - bronze.kickbase_player_snapshot
-- bronze.kickbase_match_stats
 - bronze.ligainsider_player_status
 - bronze.ingestion_runs (job telemetry)
 
@@ -306,6 +304,9 @@ kickbase-analyzer/
 - [x] Bronze file writer + run metadata
 - [x] Kickbase League Discovery (`srvl`) + CLI check script
 - [x] LigaInsider Multi-Team-Scrape (18 Vereinsseiten) stabilisiert
+- [x] Kickbase Bronze erweitert (Marktwert-Historie, Transfers, Performance-Felder via API, mit Fallbacks)
+- [x] Kickbase Full-Player-Pool (Competition-Search + Pagination + Dedup, Market nur als Fallback)
+- [x] LigaInsider Bronze erweitert (Lineup-Flag, Konkurrenzliste, Change-Tracking `last_changed_at`)
 
 ### MVP-2 (Databricks bronze/silver/gold jobs)
 - [x] Bronze ingest job: load raw files to Delta (lokales Job-Skeleton + Lakehouse Bronze Snapshot Layout)

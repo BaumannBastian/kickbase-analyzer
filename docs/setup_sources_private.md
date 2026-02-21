@@ -30,9 +30,22 @@ KICKBASE_AUTH_PATH=/v4/user/login
 KICKBASE_AUTH_EMAIL_FIELD=em
 KICKBASE_AUTH_PASSWORD_FIELD=pass
 KICKBASE_USER_AGENT=okhttp/4.11.0
-KICKBASE_PLAYER_SNAPSHOT_PATH=/v4/leagues/{league_id}/market
-KICKBASE_MATCH_STATS_PATH=/v4/leagues/{league_id}/lineup
+KICKBASE_COMPETITION_ID=
+KICKBASE_COMPETITION_PLAYERS_SEARCH_PATH=/v4/competitions/{competition_id}/players/search
+KICKBASE_COMPETITION_PLAYERS_PAGE_SIZE=100
+KICKBASE_COMPETITION_PLAYERS_QUERY=
+KICKBASE_PLAYER_SNAPSHOT_PATH=/v4/leagues/{league_id}/market   # Fallback
+KICKBASE_MATCH_STATS_PATH=
+KICKBASE_PLAYER_DETAILS_PATH=/v4/leagues/{league_id}/players/{player_id}
+KICKBASE_PLAYER_MARKET_VALUE_HISTORY_PATH=/v4/players/{player_id}/market-value
+KICKBASE_PLAYER_PERFORMANCE_PATH=/v4/players/{player_id}/performance
+KICKBASE_PLAYER_TRANSFERS_PATH=/v4/leagues/{league_id}/players/{player_id}/transfers
 ```
+
+Hinweis:
+- Der Ingestion-Runner zieht standardmaessig den **kompletten Liga-Spielerpool** ueber `competitions/{competition_id}/players/search` (mit Pagination).
+- `KICKBASE_COMPETITION_ID` wird automatisch aus der Login-Antwort (`srvl[].cpi`) erkannt, falls leer.
+- `KICKBASE_PLAYER_SNAPSHOT_PATH` bleibt als technischer Fallback auf den League-Market-Endpoint aktiv.
 
 League-ID automatisch ermitteln:
 
@@ -49,7 +62,8 @@ League-ID automatisch ermitteln:
 Erwartung:
 - `status = success`
 - `player_rows > 0`
-- `match_stats_rows > 0`
+- `player_source = competition_players` (wenn Competition-Endpoint verfuegbar)
+- `match_stats_rows` kann `0` sein, wenn `KICKBASE_MATCH_STATS_PATH` leer ist
 
 ## 3) LigaInsider Scrape testen
 
@@ -74,7 +88,6 @@ Nutze Team-Aufstellungsseiten wie z. B.:
 
 Outputs:
 - `data/bronze/kickbase_player_snapshot_<timestamp>.ndjson`
-- `data/bronze/kickbase_match_stats_<timestamp>.ndjson`
 - `data/bronze/ligainsider_status_snapshot_<timestamp>.ndjson`
 - `data/bronze/ingestion_runs.ndjson`
 

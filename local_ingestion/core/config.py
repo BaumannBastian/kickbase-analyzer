@@ -40,7 +40,15 @@ class PrivateIngestionConfig:
     auth_email_field: str
     auth_password_field: str
     player_snapshot_path: str
+    competition_id: str | None
+    competition_players_search_path: str
+    competition_players_page_size: int
+    competition_players_query: str
     match_stats_path: str
+    player_details_path: str
+    player_market_value_history_path: str
+    player_performance_path: str
+    player_transfers_path: str
     cache_dir: Path
     cache_ttl_seconds: int
     ligainsider_status_url: str | None
@@ -124,10 +132,52 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
         .strip()
         or "/v4/leagues/{league_id}/market"
     )
+    competition_id = os.environ.get("KICKBASE_COMPETITION_ID", "").strip() or None
+    competition_players_search_path = (
+        os.environ.get(
+            "KICKBASE_COMPETITION_PLAYERS_SEARCH_PATH",
+            "/v4/competitions/{competition_id}/players/search",
+        )
+        .strip()
+        or "/v4/competitions/{competition_id}/players/search"
+    )
+    competition_players_page_size = _get_int_env("KICKBASE_COMPETITION_PLAYERS_PAGE_SIZE", default=100)
+    if competition_players_page_size <= 0:
+        raise ValueError("KICKBASE_COMPETITION_PLAYERS_PAGE_SIZE must be > 0")
+    competition_players_query = os.environ.get("KICKBASE_COMPETITION_PLAYERS_QUERY", "")
     match_stats_path = (
         os.environ.get("KICKBASE_MATCH_STATS_PATH", "/v4/leagues/{league_id}/lineup")
         .strip()
         or "/v4/leagues/{league_id}/lineup"
+    )
+    player_details_path = (
+        os.environ.get(
+            "KICKBASE_PLAYER_DETAILS_PATH",
+            "/v4/leagues/{league_id}/players/{player_id}",
+        )
+        .strip()
+        or "/v4/leagues/{league_id}/players/{player_id}"
+    )
+    player_market_value_history_path = (
+        os.environ.get(
+            "KICKBASE_PLAYER_MARKET_VALUE_HISTORY_PATH",
+            "/v4/players/{player_id}/market-value",
+        )
+        .strip()
+        or "/v4/players/{player_id}/market-value"
+    )
+    player_performance_path = (
+        os.environ.get("KICKBASE_PLAYER_PERFORMANCE_PATH", "/v4/players/{player_id}/performance")
+        .strip()
+        or "/v4/players/{player_id}/performance"
+    )
+    player_transfers_path = (
+        os.environ.get(
+            "KICKBASE_PLAYER_TRANSFERS_PATH",
+            "/v4/leagues/{league_id}/players/{player_id}/transfers",
+        )
+        .strip()
+        or "/v4/leagues/{league_id}/players/{player_id}/transfers"
     )
 
     retry = RetryConfig(
@@ -197,7 +247,15 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
         auth_email_field=auth_email_field,
         auth_password_field=auth_password_field,
         player_snapshot_path=player_snapshot_path,
+        competition_id=competition_id,
+        competition_players_search_path=competition_players_search_path,
+        competition_players_page_size=competition_players_page_size,
+        competition_players_query=competition_players_query,
         match_stats_path=match_stats_path,
+        player_details_path=player_details_path,
+        player_market_value_history_path=player_market_value_history_path,
+        player_performance_path=player_performance_path,
+        player_transfers_path=player_transfers_path,
         cache_dir=cache_dir,
         cache_ttl_seconds=cache_ttl_seconds,
         ligainsider_status_url=ligainsider_status_url,
