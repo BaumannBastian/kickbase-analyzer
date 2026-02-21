@@ -126,10 +126,13 @@ def run_query(
         f"--location={location}",
         "query",
         "--use_legacy_sql=false",
-        "--",
-        sql,
     ]
-    run_cmd(cmd, dry_run=dry_run)
+    print(">>", " ".join(cmd), "< SQL via stdin")
+    if dry_run:
+        return
+    proc = subprocess.run(cmd, input=sql, text=True)
+    if proc.returncode != 0:
+        raise SystemExit(proc.returncode)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
