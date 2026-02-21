@@ -1,0 +1,18 @@
+[
+  {
+    "ligainsider_slug": "max-beispiel",
+    "player_name": "Max Beispiel",
+    "team": "FC Demo",
+    "predicted_lineup": "starter",
+    "injury_note": null,
+    "competition_risk": "low"
+  },
+  {
+    "ligainsider_slug": "luca-test",
+    "player_name": "Luca Test",
+    "team": "SV Sample",
+    "predicted_lineup": "bench",
+    "injury_note": "minor knock",
+    "competition_risk": "medium"
+  }
+]

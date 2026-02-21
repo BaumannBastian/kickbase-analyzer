@@ -1,0 +1,18 @@
+[
+  {
+    "kickbase_player_id": "kb_101",
+    "matchday": 21,
+    "minutes": 90,
+    "raw_points": 128,
+    "goals": 1,
+    "assists": 0
+  },
+  {
+    "kickbase_player_id": "kb_102",
+    "matchday": 21,
+    "minutes": 74,
+    "raw_points": 63,
+    "goals": 0,
+    "assists": 0
+  }
+]

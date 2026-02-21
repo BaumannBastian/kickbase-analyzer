@@ -1,0 +1,35 @@
+# ------------------------------------
+# .gitignore
+#
+# Ignorierte Artefakte fuer lokale Entwicklung und Laufzeitdaten.
+# ------------------------------------
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+.env
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Runtime outputs
+data/bronze/*.ndjson
+data/bronze/*.json
+data/cache/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

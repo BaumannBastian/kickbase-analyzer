@@ -1,0 +1,58 @@
+# ------------------------------------
+# pyproject.toml
+#
+# Projektdefinition fuer Packaging und Entwicklungswerkzeuge.
+# Enthalten sind auch CLI-Einstiegspunkte fuer Ingestion und Scheduler.
+#
+# Usage
+# ------------------------------------
+# - python -m pip install -e .
+# - kickbase-ingestion --mode demo
+# ------------------------------------
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kickbase-analyzer"
+version = "0.1.0"
+description = "Private Kickbase analysis pipeline (demo + private modes)."
+readme = "readme.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Bastian Baumann" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.9.0",
+  "mypy>=1.11.0"
+]
+
+[project.scripts]
+kickbase-ingestion = "local_ingestion.runners.run_ingestion:main"
+kickbase-ingestion-scheduler = "local_ingestion.runners.run_scheduler:main"
+
+[tool.setuptools]
+packages = [
+  "local_ingestion",
+  "local_ingestion.core",
+  "local_ingestion.runners",
+  "local_ingestion.kickbase_client"
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+strict = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

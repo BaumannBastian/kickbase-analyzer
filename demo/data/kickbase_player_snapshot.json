@@ -1,0 +1,18 @@
+[
+  {
+    "kickbase_player_id": "kb_101",
+    "player_name": "Max Beispiel",
+    "team": "FC Demo",
+    "position": "MID",
+    "market_value": 14500000,
+    "status": "fit"
+  },
+  {
+    "kickbase_player_id": "kb_102",
+    "player_name": "Luca Test",
+    "team": "SV Sample",
+    "position": "DEF",
+    "market_value": 8700000,
+    "status": "questionable"
+  }
+]
