@@ -8,8 +8,8 @@
 # Outputs
 # ------------------------------------
 # 1) data/lakehouse/bronze/kickbase_player_snapshot/snapshot_<ts>.ndjson
-# 2) data/lakehouse/bronze/kickbase_match_stats/snapshot_<ts>.ndjson
-# 3) data/lakehouse/bronze/ligainsider_status_snapshot/snapshot_<ts>.ndjson
+# 2) data/lakehouse/bronze/ligainsider_status_snapshot/snapshot_<ts>.ndjson
+# 3) data/lakehouse/bronze/odds_match_snapshot/snapshot_<ts>.ndjson (optional)
 #
 # Usage
 # ------------------------------------
@@ -33,10 +33,12 @@ from databricks.jobs.common_io import (
 )
 
 
-DATASETS = [
+REQUIRED_DATASETS = [
     "kickbase_player_snapshot",
-    "kickbase_match_stats",
     "ligainsider_status_snapshot",
+]
+OPTIONAL_DATASETS = [
+    "odds_match_snapshot",
 ]
 
 
@@ -54,15 +56,19 @@ def run_bronze_ingest(
     *,
     timestamp: str | None = None,
 ) -> dict[str, object]:
-    selected_timestamp = timestamp or latest_timestamp_common_flat(bronze_dir, DATASETS)
-    input_files = find_flat_files_for_timestamp(bronze_dir, DATASETS, selected_timestamp)
+    selected_timestamp = timestamp or latest_timestamp_common_flat(bronze_dir, REQUIRED_DATASETS)
+    input_files = find_flat_files_for_timestamp(bronze_dir, REQUIRED_DATASETS, selected_timestamp)
+    for dataset in OPTIONAL_DATASETS:
+        optional_path = bronze_dir / f"{dataset}_{selected_timestamp}.ndjson"
+        if optional_path.exists():
+            input_files[dataset] = optional_path
 
     loaded_at = now_utc_iso()
     files_written: list[str] = []
     rows_written = 0
 
-    for dataset in DATASETS:
-        rows = read_ndjson(input_files[dataset])
+    for dataset, input_path in input_files.items():
+        rows = read_ndjson(input_path)
         enriched_rows: list[dict[str, object]] = []
         for row in rows:
             out = dict(row)
@@ -77,7 +83,7 @@ def run_bronze_ingest(
 
     return {
         "status": "success",
-        "dataset_count": len(DATASETS),
+        "dataset_count": len(input_files),
         "timestamp": selected_timestamp,
         "rows_written": rows_written,
         "files_written": files_written,

@@ -1,7 +1,7 @@
-# Private Source Setup (Kickbase + LigaInsider)
+# Private Source Setup (Kickbase + LigaInsider + Odds API)
 
 ## Ziel
-Private Ingestion mit echten Kickbase Daten und LigaInsider Status-Snapshots.
+Private Ingestion mit echten Kickbase Daten, LigaInsider Status-Snapshots und optionalen Wettquoten.
 
 ## 1) `.env` vorbereiten
 Kopiere `.env.example` nach `.env` und setze mindestens:
@@ -13,6 +13,7 @@ KICKBASE_EMAIL=<login_email>
 KICKBASE_PASSWORD=<login_password>
 KICKBASE_USER_AGENT=okhttp/4.11.0
 LIGAINSIDER_STATUS_URL=<team_url_1>,<team_url_2>,...
+ODDS_API_KEY=<the_odds_api_key_optional>
 ```
 
 Optionale Auth-Feldnamen (falls Endpoint andere Keys erwartet):
@@ -83,12 +84,25 @@ Nutze Team-Aufstellungsseiten wie z. B.:
 ## 4) Private Ingestion ausfuehren
 
 ```bash
-./scripts/run_private_ingestion.sh --env-file .env
+./scripts/run_private_ingestion.sh --env-file .env --sources kickbase,ligainsider
+```
+
+Nur LigaInsider (schneller Iterationsmodus):
+
+```bash
+./scripts/run_private_ingestion.sh --env-file .env --sources ligainsider
+```
+
+Nur Wettquoten:
+
+```bash
+./scripts/run_private_ingestion.sh --env-file .env --sources odds
 ```
 
 Outputs:
 - `data/bronze/kickbase_player_snapshot_<timestamp>.ndjson`
 - `data/bronze/ligainsider_status_snapshot_<timestamp>.ndjson`
+- `data/bronze/odds_match_snapshot_<timestamp>.ndjson` (nur bei `--sources odds` oder `--sources all`)
 - `data/bronze/ingestion_runs.ndjson`
 
 ## 5) Optional: Datei-Fallback fuer LigaInsider

@@ -8,6 +8,8 @@
 # ------------------------------------
 # - ./scripts/run_private_ingestion.sh
 # - ./scripts/run_private_ingestion.sh --env-file .env --out-dir data/bronze
+# - ./scripts/run_private_ingestion.sh --env-file .env --sources ligainsider
+# - ./scripts/run_private_ingestion.sh --env-file .env --sources odds
 # ------------------------------------
 
 set -euo pipefail

@@ -51,6 +51,16 @@ class PrivateIngestionConfig:
     player_transfers_path: str
     cache_dir: Path
     cache_ttl_seconds: int
+    odds_api_key: str | None
+    odds_base_url: str
+    odds_sport_key: str
+    odds_regions: str
+    odds_markets: str
+    odds_odds_format: str
+    odds_date_format: str
+    odds_bookmakers: str | None
+    odds_match_limit: int
+    odds_retry: RetryConfig
     ligainsider_status_url: str | None
     ligainsider_user_agent: str
     ligainsider_retry: RetryConfig
@@ -199,6 +209,42 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
     cache_dir = Path(os.environ.get("KICKBASE_CACHE_DIR", "data/cache/kickbase"))
     cache_ttl_seconds = _get_int_env("KICKBASE_CACHE_TTL_SECONDS", default=300)
 
+    odds_api_key = os.environ.get("ODDS_API_KEY", "").strip() or None
+    odds_base_url = (
+        os.environ.get("ODDS_BASE_URL", "https://api.the-odds-api.com/v4").strip()
+        or "https://api.the-odds-api.com/v4"
+    )
+    odds_sport_key = (
+        os.environ.get("ODDS_SPORT_KEY", "soccer_germany_bundesliga").strip()
+        or "soccer_germany_bundesliga"
+    )
+    odds_regions = os.environ.get("ODDS_REGIONS", "eu").strip() or "eu"
+    odds_markets = os.environ.get("ODDS_MARKETS", "h2h,totals").strip() or "h2h,totals"
+    odds_odds_format = os.environ.get("ODDS_ODDS_FORMAT", "decimal").strip() or "decimal"
+    odds_date_format = os.environ.get("ODDS_DATE_FORMAT", "iso").strip() or "iso"
+    odds_bookmakers = os.environ.get("ODDS_BOOKMAKERS", "").strip() or None
+    odds_match_limit = _get_int_env("ODDS_MATCH_LIMIT", default=9)
+    if odds_match_limit <= 0:
+        raise ValueError("ODDS_MATCH_LIMIT must be > 0")
+
+    odds_retry = RetryConfig(
+        timeout_seconds=_get_float_env("ODDS_TIMEOUT_SECONDS", default=retry.timeout_seconds),
+        max_retries=_get_int_env("ODDS_MAX_RETRIES", default=retry.max_retries),
+        backoff_seconds=_get_float_env("ODDS_BACKOFF_SECONDS", default=retry.backoff_seconds),
+        rate_limit_seconds=_get_float_env(
+            "ODDS_RATE_LIMIT_SECONDS",
+            default=max(0.25, retry.rate_limit_seconds),
+        ),
+    )
+    if odds_retry.max_retries < 0:
+        raise ValueError("ODDS_MAX_RETRIES must be >= 0")
+    if odds_retry.timeout_seconds <= 0:
+        raise ValueError("ODDS_TIMEOUT_SECONDS must be > 0")
+    if odds_retry.backoff_seconds < 0:
+        raise ValueError("ODDS_BACKOFF_SECONDS must be >= 0")
+    if odds_retry.rate_limit_seconds < 0:
+        raise ValueError("ODDS_RATE_LIMIT_SECONDS must be >= 0")
+
     ligainsider_status_url = os.environ.get("LIGAINSIDER_STATUS_URL", "").strip() or None
     ligainsider_user_agent = (
         os.environ.get("LIGAINSIDER_USER_AGENT", "kickbase-analyzer/0.1 (+private-use)")
@@ -258,6 +304,16 @@ def load_private_ingestion_config(env_file: Path | None = None) -> PrivateIngest
         player_transfers_path=player_transfers_path,
         cache_dir=cache_dir,
         cache_ttl_seconds=cache_ttl_seconds,
+        odds_api_key=odds_api_key,
+        odds_base_url=odds_base_url,
+        odds_sport_key=odds_sport_key,
+        odds_regions=odds_regions,
+        odds_markets=odds_markets,
+        odds_odds_format=odds_odds_format,
+        odds_date_format=odds_date_format,
+        odds_bookmakers=odds_bookmakers,
+        odds_match_limit=odds_match_limit,
+        odds_retry=odds_retry,
         ligainsider_status_url=ligainsider_status_url,
         ligainsider_user_agent=ligainsider_user_agent,
         ligainsider_retry=ligainsider_retry,

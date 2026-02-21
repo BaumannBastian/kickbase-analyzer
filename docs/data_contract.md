@@ -5,8 +5,8 @@
 Each ingestion run writes timestamped NDJSON files:
 
 - `kickbase_player_snapshot_YYYY-MM-DDTHHMMSSZ.ndjson`
-- `kickbase_match_stats_YYYY-MM-DDTHHMMSSZ.ndjson`
 - `ligainsider_status_snapshot_YYYY-MM-DDTHHMMSSZ.ndjson`
+- `odds_match_snapshot_YYYY-MM-DDTHHMMSSZ.ndjson` (optional, wenn `--sources` `odds` enthaelt)
 
 Required audit columns in each row:
 

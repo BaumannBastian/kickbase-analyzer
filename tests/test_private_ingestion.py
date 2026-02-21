@@ -20,6 +20,7 @@ from local_ingestion.core.config import PrivateIngestionConfig, RetryConfig, loa
 from local_ingestion.core.private_ingestion import run_private_ingestion
 from local_ingestion.kickbase_client.client import HttpResponse, KickbaseClient
 from local_ingestion.ligainsider_scraper.scraper import HtmlResponse
+from local_ingestion.odds_client.client import HttpResponse as OddsHttpResponse
 
 
 class FakeTransport:
@@ -67,6 +68,28 @@ class FakeHtmlTransport:
         return queue.pop(0)
 
 
+class FakeOddsTransport:
+    def __init__(self, responses: dict[tuple[str, str], list[OddsHttpResponse]]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, str]] = []
+
+    def request(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        timeout_seconds: float,
+    ) -> OddsHttpResponse:
+        del headers, timeout_seconds
+        key = (method, url)
+        self.calls.append(key)
+        queue = self.responses.get(key)
+        if not queue:
+            raise AssertionError(f"No fake response configured for {method} {url}")
+        return queue.pop(0)
+
+
 class PrivateIngestionTests(unittest.TestCase):
     def _base_config(self, root: Path) -> PrivateIngestionConfig:
         return PrivateIngestionConfig(
@@ -91,6 +114,21 @@ class PrivateIngestionTests(unittest.TestCase):
             player_transfers_path="/leagues/{league_id}/players/{player_id}/transfers",
             cache_dir=root / "cache",
             cache_ttl_seconds=300,
+            odds_api_key=None,
+            odds_base_url="https://api.the-odds-api.com/v4",
+            odds_sport_key="soccer_germany_bundesliga",
+            odds_regions="eu",
+            odds_markets="h2h,totals",
+            odds_odds_format="decimal",
+            odds_date_format="iso",
+            odds_bookmakers=None,
+            odds_match_limit=9,
+            odds_retry=RetryConfig(
+                timeout_seconds=5.0,
+                max_retries=1,
+                backoff_seconds=0.0,
+                rate_limit_seconds=0.0,
+            ),
             ligainsider_status_url=None,
             ligainsider_user_agent="kickbase-analyzer-test",
             ligainsider_retry=RetryConfig(
@@ -347,6 +385,95 @@ class PrivateIngestionTests(unittest.TestCase):
             )
             self.assertIsNotNone(ligainsider_path)
             self.assertEqual(len(ligainsider_transport.calls), 1)
+
+    def test_private_ingestion_can_run_ligainsider_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "bronze"
+            config = self._base_config(root)
+            config = PrivateIngestionConfig(
+                **{
+                    **config.__dict__,
+                    "ligainsider_status_url": "https://www.ligainsider.test/status",
+                }
+            )
+
+            transport = FakeTransport(responses={})
+            ligainsider_transport = FakeHtmlTransport(
+                responses={
+                    ("GET", "https://www.ligainsider.test/status"): [
+                        HtmlResponse(
+                            status_code=200,
+                            body=(
+                                '<div data-player-name="Max Beispiel" '
+                                'data-status="fit" data-predicted-lineup="sicher" '
+                                'data-player-slug="max-beispiel"></div>'
+                            ),
+                        )
+                    ]
+                }
+            )
+
+            summary = run_private_ingestion(
+                config,
+                out_dir,
+                sources={"ligainsider"},
+                transport=transport,
+                ligainsider_transport=ligainsider_transport,
+            )
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["rows_written"], 1)
+            self.assertEqual(len(transport.calls), 0)
+            self.assertEqual(len(ligainsider_transport.calls), 1)
+
+    def test_private_ingestion_can_run_odds_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "bronze"
+            config = self._base_config(root)
+            config = PrivateIngestionConfig(
+                **{
+                    **config.__dict__,
+                    "odds_api_key": "test-key",
+                }
+            )
+
+            odds_transport = FakeOddsTransport(
+                responses={
+                    (
+                        "GET",
+                        (
+                            "https://api.the-odds-api.com/v4/sports/soccer_germany_bundesliga/odds/"
+                            "?apiKey=test-key&regions=eu&markets=h2h%2Ctotals&oddsFormat=decimal&dateFormat=iso"
+                        ),
+                    ): [
+                        OddsHttpResponse(
+                            status_code=200,
+                            body=(
+                                '[{"id":"event_1","sport_key":"soccer_germany_bundesliga",'
+                                '"commence_time":"2026-02-22T14:30:00Z","home_team":"FC A","away_team":"FC B",'
+                                '"bookmakers":[{"key":"book_a","markets":[{"key":"h2h","outcomes":['
+                                '{"name":"FC A","price":1.9},{"name":"Draw","price":3.6},{"name":"FC B","price":4.2}'
+                                ']},{"key":"totals","outcomes":[{"name":"Over","price":1.85,"point":2.5},'
+                                '{"name":"Under","price":1.95,"point":2.5}]}]}]}]'
+                            ),
+                        )
+                    ],
+                }
+            )
+
+            summary = run_private_ingestion(
+                config,
+                out_dir,
+                sources={"odds"},
+                odds_transport=odds_transport,
+            )
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["rows_written"], 1)
+
+            odds_path = next(out_dir.glob("odds_match_snapshot_*.ndjson"), None)
+            self.assertIsNotNone(odds_path)
+            self.assertEqual(len(odds_transport.calls), 1)
 
     def test_private_ingestion_prefers_competition_players_when_configured(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -13,6 +13,7 @@
 # Usage
 # ------------------------------------
 # - python -m local_ingestion.runners.run_scheduler --mode private --interval-seconds 1800
+# - python -m local_ingestion.runners.run_scheduler --mode private --sources ligainsider --interval-seconds 600
 # - python -m local_ingestion.runners.run_scheduler --mode demo --max-runs 1
 # ------------------------------------
 
@@ -27,7 +28,11 @@ from typing import Callable, Sequence
 
 from local_ingestion.core.bronze_writer import run_demo_ingestion
 from local_ingestion.core.config import PrivateIngestionConfig, load_private_ingestion_config
-from local_ingestion.core.private_ingestion import run_private_ingestion
+from local_ingestion.core.private_ingestion import (
+    SUPPORTED_PRIVATE_SOURCES,
+    normalize_sources,
+    run_private_ingestion,
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -39,6 +44,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=Path("data/bronze"))
     parser.add_argument("--source-version", type=str, default=None)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument(
+        "--sources",
+        type=str,
+        default="kickbase,ligainsider",
+        help=(
+            "Private mode sources as comma-separated list. "
+            f"Supported: {', '.join(sorted(SUPPORTED_PRIVATE_SOURCES))}. "
+            "Use 'all' for all configured sources."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -72,13 +87,14 @@ def _build_private_runner(
     env_file: Path,
     out_dir: Path,
     source_version: str | None,
+    sources: set[str],
 ) -> Callable[[], dict[str, object]]:
     config: PrivateIngestionConfig = load_private_ingestion_config(env_file)
     if source_version:
         config = replace(config, source_version=source_version)
 
     def _run_once() -> dict[str, object]:
-        return run_private_ingestion(config, out_dir)
+        return run_private_ingestion(config, out_dir, sources=sources)
 
     return _run_once
 
@@ -93,10 +109,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_demo_ingestion(args.demo_dir, args.out_dir, source_version=source_version)
 
     else:
+        source_text = args.sources.strip().lower()
+        sources = (
+            set(SUPPORTED_PRIVATE_SOURCES)
+            if source_text == "all"
+            else normalize_sources([token.strip() for token in args.sources.split(",") if token.strip()])
+        )
         run_once = _build_private_runner(
             env_file=args.env_file,
             out_dir=args.out_dir,
             source_version=args.source_version,
+            sources=sources,
         )
 
     run_scheduler(

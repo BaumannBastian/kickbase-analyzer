@@ -35,7 +35,6 @@ from databricks.jobs.common_io import (
 
 INPUT_DATASETS = [
     "kickbase_player_snapshot",
-    "kickbase_match_stats",
     "ligainsider_status_snapshot",
 ]
 
@@ -165,7 +164,6 @@ def run_silver_sync(
     )
 
     kb_players = read_ndjson(input_files["kickbase_player_snapshot"])
-    kb_match = read_ndjson(input_files["kickbase_match_stats"])
     li_status = read_ndjson(input_files["ligainsider_status_snapshot"])
 
     li_by_name: dict[str, dict[str, Any]] = {}
@@ -241,30 +239,22 @@ def run_silver_sync(
         )
 
     fct_player_match: list[dict[str, Any]] = []
-    for row in kb_match:
+    for row in kb_players:
         kickbase_player_id = _first_str(row, ["kickbase_player_id", "player_id", "id", "i"])
         player_uid = player_id_to_uid.get(kickbase_player_id)
         if player_uid is None:
             continue
 
-        raw_points = row.get("raw_points")
-        if raw_points is None:
-            raw_points = _latest_points_from_ph(row.get("ph"))
-        if raw_points is None:
-            raw_points = row.get("ap")
-
-        matchday = row.get("matchday")
-        if matchday is None:
-            matchday = row.get("mdst")
-
         fct_player_match.append(
             {
                 "player_uid": player_uid,
-                "matchday": matchday,
-                "minutes": row.get("minutes"),
-                "raw_points": raw_points,
-                "goals": row.get("goals"),
-                "assists": row.get("assists"),
+                "matchday": row.get("last_matchday")
+                if row.get("last_matchday") is not None
+                else 0,
+                "minutes": row.get("average_minutes"),
+                "raw_points": row.get("last_match_points", row.get("average_points")),
+                "goals": row.get("goals_total"),
+                "assists": row.get("assists_total"),
             }
         )
 

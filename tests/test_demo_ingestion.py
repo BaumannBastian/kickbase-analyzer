@@ -36,8 +36,11 @@ class DemoIngestionTests(unittest.TestCase):
 
             self.assertEqual(summary["status"], "success")
             self.assertEqual(summary["mode"], "demo")
-            self.assertEqual(len(summary["files_written"]), len(DATASETS))
-            self.assertEqual(summary["rows_written"], 6)
+            expected_demo_datasets = len(
+                [dataset for dataset in DATASETS if dataset.input_filename is not None]
+            )
+            self.assertEqual(len(summary["files_written"]), expected_demo_datasets)
+            self.assertEqual(summary["rows_written"], 4)
 
             for filename in summary["files_written"]:
                 self.assertTrue((out_dir / filename).exists())

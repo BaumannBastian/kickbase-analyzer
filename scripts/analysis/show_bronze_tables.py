@@ -1,8 +1,8 @@
 # ------------------------------------
 # show_bronze_tables.py
 #
-# Dieses Skript zeigt die beiden Bronze-Tabellen (Kickbase und
-# LigaInsider) in einer DataFrame-aehnlichen Terminalansicht.
+# Dieses Skript zeigt die Bronze-Tabellen (Kickbase, LigaInsider
+# und optional Wettquoten) in einer DataFrame-aehnlichen Terminalansicht.
 # Wenn pandas verfuegbar ist, wird pandas fuer die Darstellung
 # genutzt; sonst wird ein eingebauter Tabellenrenderer verwendet.
 #
@@ -28,6 +28,7 @@ from typing import Any, Sequence
 
 KB_FILE_PREFIX = "kickbase_player_snapshot_"
 LI_FILE_PREFIX = "ligainsider_status_snapshot_"
+ODDS_FILE_PREFIX = "odds_match_snapshot_"
 
 
 KB_COLUMNS = [
@@ -59,6 +60,21 @@ LI_COLUMNS = [
     "competition_player_names",
     "status",
     "last_changed_at",
+]
+
+
+ODDS_COLUMNS = [
+    "odds_event_id",
+    "commence_time",
+    "home_team",
+    "away_team",
+    "h2h_home_odds",
+    "h2h_draw_odds",
+    "h2h_away_odds",
+    "totals_line",
+    "totals_over_odds",
+    "totals_under_odds",
+    "bookmaker_count",
 ]
 
 
@@ -184,6 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     kb_path = input_dir / f"{KB_FILE_PREFIX}{timestamp}.ndjson"
     li_path = input_dir / f"{LI_FILE_PREFIX}{timestamp}.ndjson"
+    odds_path = input_dir / f"{ODDS_FILE_PREFIX}{timestamp}.ndjson"
     if not kb_path.exists() or not li_path.exists():
         raise FileNotFoundError(
             f"Expected files for timestamp {timestamp} in {input_dir}: {kb_path.name}, {li_path.name}"
@@ -191,8 +208,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     kb_rows = _read_ndjson(kb_path)
     li_rows = _read_ndjson(li_path)
+    odds_rows = _read_ndjson(odds_path) if odds_path.exists() else []
     kb_rows = _filter_rows_by_player(kb_rows, args.player)
     li_rows = _filter_rows_by_player(li_rows, args.player)
+    odds_rows = _filter_rows_by_player(odds_rows, args.player)
 
     kb_render = _try_render_with_pandas(kb_rows, KB_COLUMNS, args.limit)
     if kb_render is None:
@@ -201,6 +220,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     li_render = _try_render_with_pandas(li_rows, LI_COLUMNS, args.limit)
     if li_render is None:
         li_render = _render_table(li_rows, LI_COLUMNS, args.limit)
+
+    odds_render = _try_render_with_pandas(odds_rows, ODDS_COLUMNS, args.limit)
+    if odds_render is None:
+        odds_render = _render_table(odds_rows, ODDS_COLUMNS, args.limit)
 
     print(f"Bronze timestamp: {timestamp}")
     print(f"Input directory: {input_dir}")
@@ -212,6 +235,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("")
     print(f"LigaInsider rows: {len(li_rows)} (showing {min(len(li_rows), args.limit)})")
     print(li_render)
+    print("")
+    print(f"Odds rows: {len(odds_rows)} (showing {min(len(odds_rows), args.limit)})")
+    print(odds_render)
     return 0
 
 

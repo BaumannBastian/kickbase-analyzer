@@ -7,6 +7,7 @@
 # Usage
 # ------------------------------------
 # - ./scripts/run_scheduler.sh --mode private --interval-seconds 1800
+# - ./scripts/run_scheduler.sh --mode private --sources ligainsider --interval-seconds 600
 # - ./scripts/run_scheduler.sh --mode demo --max-runs 1
 # ------------------------------------
 

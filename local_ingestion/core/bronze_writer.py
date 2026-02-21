@@ -43,16 +43,47 @@ DATASETS: tuple[DatasetConfig, ...] = (
         input_filename="kickbase_player_snapshot.json",
     ),
     DatasetConfig(
-        dataset_name="kickbase_match_stats",
-        source="kickbase",
-        input_filename="kickbase_match_stats.json",
-    ),
-    DatasetConfig(
         dataset_name="ligainsider_status_snapshot",
         source="ligainsider",
         input_filename="ligainsider_status_snapshot.json",
     ),
+    DatasetConfig(
+        dataset_name="odds_match_snapshot",
+        source="odds_api",
+        input_filename=None,
+    ),
 )
+
+
+DATASET_CONFIG_BY_NAME: dict[str, DatasetConfig] = {
+    dataset.dataset_name: dataset
+    for dataset in DATASETS
+}
+
+
+def _resolve_datasets(
+    rows_by_dataset: dict[str, list[dict[str, Any]]],
+    dataset_names: list[str] | None,
+) -> list[DatasetConfig]:
+    requested = dataset_names or list(rows_by_dataset.keys())
+    known_order = [dataset.dataset_name for dataset in DATASETS]
+    ordered_names: list[str] = []
+
+    for name in known_order:
+        if name in requested and name not in ordered_names:
+            ordered_names.append(name)
+
+    for name in requested:
+        if name not in ordered_names:
+            ordered_names.append(name)
+
+    configs: list[DatasetConfig] = []
+    for name in ordered_names:
+        config = DATASET_CONFIG_BY_NAME.get(name)
+        if config is None:
+            raise ValueError(f"Unknown dataset name: {name}")
+        configs.append(config)
+    return configs
 
 
 def to_utc(dt: datetime | None = None) -> datetime:
@@ -124,6 +155,7 @@ def write_bronze_outputs(
     rows_by_dataset: dict[str, list[dict[str, Any]]],
     out_dir: Path,
     *,
+    dataset_names: list[str] | None = None,
     mode: str,
     now: datetime | None = None,
     source_version: str,
@@ -137,7 +169,9 @@ def write_bronze_outputs(
     files_written: list[str] = []
     total_rows = 0
 
-    for dataset in DATASETS:
+    selected_datasets = _resolve_datasets(rows_by_dataset, dataset_names)
+
+    for dataset in selected_datasets:
         raw_rows = rows_by_dataset.get(dataset.dataset_name, [])
         for row in raw_rows:
             if not isinstance(row, dict):
@@ -191,6 +225,7 @@ def run_demo_ingestion(
     return write_bronze_outputs(
         rows_by_dataset,
         out_dir,
+        dataset_names=[dataset.dataset_name for dataset in DATASETS if dataset.input_filename is not None],
         mode="demo",
         now=now,
         source_version=source_version,

@@ -60,6 +60,7 @@ Konsequenz:
 Output: **Raw Staging Files** (JSON/NDJSON/Parquet), versioniert + timestamped:
 - kickbase_player_snapshot_YYYY-MM-DDTHHMMSS.json
 - ligainsider_status_snapshot_YYYY-MM-DDTHHMMSS.json
+- odds_match_snapshot_YYYY-MM-DDTHHMMSS.json (The Odds API, optional)
 
 ### Step B — Databricks Lakehouse: Bronze → Silver → Gold
 - Bronze: raw ingest (append-only), minimal schema, audit columns
@@ -93,6 +94,7 @@ Orchestrierung:
 Ziel: Nichts verlieren. Alles ist zeitlich nachvollziehbar (Backtesting).
 - bronze.kickbase_player_snapshot
 - bronze.ligainsider_player_status
+- bronze.odds_match_snapshot
 - bronze.ingestion_runs (job telemetry)
 
 Common columns:
@@ -307,6 +309,8 @@ kickbase-analyzer/
 - [x] Kickbase Bronze erweitert (Marktwert-Historie, Transfers, Performance-Felder via API, mit Fallbacks)
 - [x] Kickbase Full-Player-Pool (Competition-Search + Pagination + Dedup, Market nur als Fallback)
 - [x] LigaInsider Bronze erweitert (Lineup-Flag, Konkurrenzliste, Change-Tracking `last_changed_at`)
+- [x] Selektive private Ingestion-Sources (`--sources kickbase,ligainsider,odds`), damit Teil-Updates ohne kompletten Kickbase-Refresh moeglich sind.
+- [x] Wettquoten als dritte Bronze-Quelle (`odds_match_snapshot`) eingebunden (1. Bundesliga, H2H + Totals fuer die naechsten 9 Spiele).
 
 ### MVP-2 (Databricks bronze/silver/gold jobs)
 - [x] Bronze ingest job: load raw files to Delta (lokales Job-Skeleton + Lakehouse Bronze Snapshot Layout)
@@ -334,9 +338,10 @@ kickbase-analyzer/
 - [ ] Fallback-Strategie fuer Marktwert-Historie implementieren, falls kein dedizierter API-Endpunkt verfuegbar ist (Historisierung aus taeglichen Snapshots).
 - [x] LigaInsider Konkurrenz-Extraktion auf UI-Logik umstellen: Positions-Kandidaten ueber den gruennen Pfeil/Carousel pro Spieler erfassen.
 - [x] LigaInsider Felder `competition_player_count` und `competition_player_names` gegen die echte Positionskonkurrenz validieren (Regression-Tests + Sample-basierte QA).
-- [ ] Silver-Datenmodell fuer 3 Targets finalisieren: `plays_next_match`, `expected_market_value_t+h`, `expected_points_next/rest`.
-- [ ] Silver als eine kanonische Joined-Base (`player_day`) mit zusaetzlichen target-spezifischen Feature-Views aufbauen (statt isolierter Silos), damit gemeinsame Features wiederverwendbar sind.
-- [ ] Wettquoten als zusaetzliche Bronze-Quelle planen (spaeteres Scraping/API), inkl. Join-Keys auf Fixture-/Team-Ebene fuer Silver/Gold Features.
+- [ ] Silver v0.9 umsetzen: `silver.player_snapshot` als Joined Base (Kickbase + LigaInsider, eine Zeile pro Spieler/Snapshot) mit logisch gruppierten Feature-Spalten fuer Punkte, Aufstellchance und Marktwert.
+- [ ] Silver v0.9 umsetzen: `silver.team_matchup_snapshot` (eine Zeile pro Team/naechstes Matchup) inkl. Wettquoten-basiertem wahrscheinlichsten Ergebnis und einfacher Formkurve.
+- [ ] Stabile Player-Identity in Silver finalisieren: eigener interner `player_uid` (fortlaufend), Name/Slug-Matching, persistentes Mapping, inaktive Zuordnungen historisieren.
+- [ ] Join-Key-Strategie Odds -> Teams/Fixtures in Silver/Gold haerten (Teamnamen-Normalisierung, Heim/Auswaerts-Mapping, QA-Checks).
 - [ ] Start model calibration (logistic/GBM).
 - [ ] MW forecast model (delta_7d).
 - [ ] Opponent/team strength features.

@@ -2,8 +2,8 @@
 # private_ingestion.py
 #
 # Dieses Modul orchestriert den private Ingestion-Flow:
-# Kickbase Auth, Snapshot-Abruf, optionales LigaInsider-File
-# und Bronze-Schreiben mit Telemetrie.
+# selektiver Source-Abruf fuer Kickbase API, LigaInsider und
+# The-Odds-API plus Bronze-Schreiben mit Telemetrie.
 #
 # Outputs
 # ------------------------------------
@@ -13,6 +13,7 @@
 # Usage
 # ------------------------------------
 # - run_private_ingestion(config, Path("data/bronze"))
+# - run_private_ingestion(config, Path("data/bronze"), sources={"ligainsider"})
 # ------------------------------------
 
 from __future__ import annotations
@@ -27,8 +28,39 @@ from local_ingestion.core.cache import JsonFileCache
 from local_ingestion.core.config import PrivateIngestionConfig
 from local_ingestion.core.kickbase_bronze_builder import build_kickbase_player_row
 from local_ingestion.core.ligainsider_bronze_builder import build_ligainsider_rows
-from local_ingestion.kickbase_client.client import HttpTransport, KickbaseClient
+from local_ingestion.core.odds_bronze_builder import build_odds_rows
+from local_ingestion.kickbase_client.client import HttpTransport as KickbaseHttpTransport, KickbaseClient
 from local_ingestion.ligainsider_scraper.scraper import HtmlTransport, LigaInsiderScraper
+from local_ingestion.odds_client.client import HttpTransport as OddsHttpTransport, OddsApiClient
+
+
+SUPPORTED_PRIVATE_SOURCES: frozenset[str] = frozenset({"kickbase", "ligainsider", "odds"})
+DEFAULT_PRIVATE_SOURCES: frozenset[str] = frozenset({"kickbase", "ligainsider"})
+SOURCE_TO_DATASET: dict[str, str] = {
+    "kickbase": "kickbase_player_snapshot",
+    "ligainsider": "ligainsider_status_snapshot",
+    "odds": "odds_match_snapshot",
+}
+
+
+def normalize_sources(sources: set[str] | list[str] | tuple[str, ...] | None) -> set[str]:
+    if sources is None:
+        return set(DEFAULT_PRIVATE_SOURCES)
+
+    normalized = {str(item).strip().lower() for item in sources if str(item).strip()}
+    if not normalized:
+        return set(DEFAULT_PRIVATE_SOURCES)
+
+    invalid = normalized.difference(SUPPORTED_PRIVATE_SOURCES)
+    if invalid:
+        raise ValueError(
+            "Unsupported private ingestion sources: "
+            + ", ".join(sorted(invalid))
+            + ". Supported: "
+            + ", ".join(sorted(SUPPORTED_PRIVATE_SOURCES))
+        )
+
+    return normalized
 
 
 def _kickbase_player_id(row: dict[str, Any]) -> str:
@@ -99,15 +131,13 @@ def load_latest_dataset_snapshot(out_dir: Path, dataset_name: str) -> list[dict[
     return rows
 
 
-def run_private_ingestion(
+def _build_kickbase_rows(
     config: PrivateIngestionConfig,
-    out_dir: Path,
+    cache: JsonFileCache,
     *,
-    now: datetime | None = None,
-    transport: HttpTransport | None = None,
-    ligainsider_transport: HtmlTransport | None = None,
-) -> dict[str, Any]:
-    cache = JsonFileCache(config.cache_dir)
+    now: datetime | None,
+    transport: KickbaseHttpTransport | None,
+) -> list[dict[str, Any]]:
     client = KickbaseClient(
         base_url=config.base_url,
         auth_path=config.auth_path,
@@ -132,6 +162,7 @@ def run_private_ingestion(
     token = client.authenticate()
     competition_id = config.competition_id or client.discover_competition_id(league_id=config.league_id)
     kickbase_market_rows: list[dict[str, Any]] = []
+
     if competition_id:
         kickbase_market_rows = client.fetch_all_competition_players(
             token=token,
@@ -159,8 +190,12 @@ def run_private_ingestion(
 
     if not kickbase_market_rows:
         kickbase_market_rows = client.fetch_player_snapshot(token=token, league_id=config.league_id)
-    kickbase_players: list[dict[str, Any]] = []
 
+    snapshot_ts = now.astimezone(UTC) if now is not None and now.tzinfo else (
+        now.replace(tzinfo=UTC) if now is not None else datetime.now(UTC)
+    )
+
+    kickbase_players: list[dict[str, Any]] = []
     for market_row in kickbase_market_rows:
         player_id = str(
             market_row.get("kickbase_player_id")
@@ -186,10 +221,6 @@ def run_private_ingestion(
             player_id=player_id,
         )
 
-        snapshot_ts = now.astimezone(UTC) if now is not None and now.tzinfo else (
-            now.replace(tzinfo=UTC) if now is not None else datetime.now(UTC)
-        )
-
         kickbase_players.append(
             build_kickbase_player_row(
                 market_row=market_row,
@@ -201,6 +232,16 @@ def run_private_ingestion(
             )
         )
 
+    return kickbase_players
+
+
+def _build_ligainsider_rows(
+    config: PrivateIngestionConfig,
+    cache: JsonFileCache,
+    out_dir: Path,
+    *,
+    ligainsider_transport: HtmlTransport | None,
+) -> list[dict[str, Any]]:
     ligainsider_rows: list[dict[str, Any]]
     if config.ligainsider_status_file is not None:
         ligainsider_rows = load_optional_snapshot(config.ligainsider_status_file)
@@ -235,19 +276,87 @@ def run_private_ingestion(
         out_dir,
         "ligainsider_status_snapshot",
     )
-    ligainsider_rows = build_ligainsider_rows(
+    return build_ligainsider_rows(
         raw_rows=ligainsider_rows,
         previous_rows=previous_ligainsider_rows,
     )
 
-    rows_by_dataset = {
-        "kickbase_player_snapshot": kickbase_players,
-        "ligainsider_status_snapshot": ligainsider_rows,
-    }
+
+def _build_odds_rows(
+    config: PrivateIngestionConfig,
+    cache: JsonFileCache,
+    *,
+    odds_transport: OddsHttpTransport | None,
+) -> list[dict[str, Any]]:
+    if config.odds_api_key is None:
+        raise ValueError("ODDS_API_KEY is required when private source 'odds' is enabled.")
+
+    client = OddsApiClient(
+        api_key=config.odds_api_key,
+        base_url=config.odds_base_url,
+        sport_key=config.odds_sport_key,
+        regions=config.odds_regions,
+        markets=config.odds_markets,
+        odds_format=config.odds_odds_format,
+        date_format=config.odds_date_format,
+        bookmakers=config.odds_bookmakers,
+        retry_config=config.odds_retry,
+        cache=cache,
+        cache_ttl_seconds=config.cache_ttl_seconds,
+        transport=odds_transport,
+    )
+    events = client.fetch_upcoming_events(limit=config.odds_match_limit)
+    return build_odds_rows(events)
+
+
+def run_private_ingestion(
+    config: PrivateIngestionConfig,
+    out_dir: Path,
+    *,
+    now: datetime | None = None,
+    sources: set[str] | list[str] | tuple[str, ...] | None = None,
+    transport: KickbaseHttpTransport | None = None,
+    ligainsider_transport: HtmlTransport | None = None,
+    odds_transport: OddsHttpTransport | None = None,
+) -> dict[str, Any]:
+    selected_sources = normalize_sources(sources)
+    cache = JsonFileCache(config.cache_dir)
+
+    rows_by_dataset: dict[str, list[dict[str, Any]]] = {}
+
+    if "kickbase" in selected_sources:
+        rows_by_dataset[SOURCE_TO_DATASET["kickbase"]] = _build_kickbase_rows(
+            config,
+            cache,
+            now=now,
+            transport=transport,
+        )
+
+    if "ligainsider" in selected_sources:
+        rows_by_dataset[SOURCE_TO_DATASET["ligainsider"]] = _build_ligainsider_rows(
+            config,
+            cache,
+            out_dir,
+            ligainsider_transport=ligainsider_transport,
+        )
+
+    if "odds" in selected_sources:
+        rows_by_dataset[SOURCE_TO_DATASET["odds"]] = _build_odds_rows(
+            config,
+            cache,
+            odds_transport=odds_transport,
+        )
+
+    dataset_names = [
+        SOURCE_TO_DATASET[source]
+        for source in ("kickbase", "ligainsider", "odds")
+        if source in selected_sources
+    ]
 
     return write_bronze_outputs(
         rows_by_dataset,
         out_dir,
+        dataset_names=dataset_names,
         mode="private",
         now=now,
         source_version=config.source_version,

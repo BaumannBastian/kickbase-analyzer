@@ -161,32 +161,36 @@ Siehe docs/architecture.md für die vollständige Struktur.
 5) LigaInsider Scrape prüfen (`.env` erforderlich)  
    `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
 6) Private-Ingestion ausführen (`.env` erforderlich)  
-   `./scripts/run_private_ingestion.sh --env-file .env`
-7) Scheduler ausführen (z.B. alle 30 Minuten)  
-   `./scripts/run_scheduler.sh --mode private --interval-seconds 1800`
-8) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
+   `./scripts/run_private_ingestion.sh --env-file .env --sources kickbase,ligainsider`
+7) Nur LigaInsider aktualisieren (ohne kompletten Kickbase-Refresh)  
+   `./scripts/run_private_ingestion.sh --env-file .env --sources ligainsider`
+8) Wettquoten (The Odds API) als dritte Bronze-Tabelle laden  
+   `./scripts/run_private_ingestion.sh --env-file .env --sources odds`
+9) Scheduler ausführen (z.B. alle 30 Minuten)  
+   `./scripts/run_scheduler.sh --mode private --sources kickbase,ligainsider --interval-seconds 1800`
+10) Databricks-Job-Skeleton lokal ausführen (Bronze → Silver → Gold)  
    `./scripts/run_databricks_jobs_demo.sh`
-9) MARTS lokal erzeugen (bewertbarer Output)  
+11) MARTS lokal erzeugen (bewertbarer Output)  
    `./scripts/run_build_marts_local.sh`
-10) End-to-End in einem Lauf  
+12) End-to-End in einem Lauf  
    `./scripts/run_pipeline_demo.sh`
-11) Backtesting-Report erzeugen  
+13) Backtesting-Report erzeugen  
    `./scripts/run_backtesting.sh`
-12) Tests ausführen  
+14) Tests ausführen  
    `./scripts/test.sh`
-13) Lint/Compile-Check  
+15) Lint/Compile-Check  
    `./scripts/lint.sh`
-14) Bronze-Outputs prüfen  
+16) Bronze-Outputs prüfen  
    `data/bronze/*.ndjson`
-15) Externe Toolchain prüfen  
+17) Externe Toolchain prüfen  
    `./scripts/check_external_tools.sh`
-16) Databricks + BigQuery Setup (Step-by-Step)  
+18) Databricks + BigQuery Setup (Step-by-Step)  
    `docs/setup_databricks_bigquery.md`
-17) BigQuery CLI installieren/authentifizieren (WSL)  
+19) BigQuery CLI installieren/authentifizieren (WSL)  
    `./scripts/bigquery/install_gcloud_cli_wsl.sh`  
    `./scripts/bigquery/configure_gcloud_auth.sh --project <gcp_project_id>`  
    `./scripts/bigquery/check_bq_setup.sh`
-18) Power BI Desktop Setup (lokal)  
+20) Power BI Desktop Setup (lokal)  
    `docs/setup_powerbi_desktop.md`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
@@ -217,6 +221,7 @@ Source Connectivity Checks:
 - `./scripts/run_kickbase_auth_check.sh --env-file .env --verify-snapshots`
 - `./scripts/run_kickbase_league_discovery.sh --env-file .env`
 - `./scripts/run_ligainsider_scrape_check.sh --env-file .env`
+- `python3 -m local_ingestion.runners.run_ingestion --mode private --sources odds --env-file .env`
 
 Hinweis LigaInsider URL:
 - Nicht die Homepage (`https://www.ligainsider.de/`) nutzen
@@ -260,6 +265,7 @@ Databricks Repo/Job Runner:
 - Kickbase Data Quality: `smc`/`ismc` Mapping fixen, `average_minutes` korrigieren, `team_id` Mapping dokumentieren.
 - Marktwert-Historie robust machen: 10d Tuples + 365d High/Low aus historisierten Daten.
 - LigaInsider Konkurrenzlogik neu: Positions-Konkurrenz ueber den gruennen Pfeil/Carousel extrahieren.
-- Silver finalisieren als Joined Base (`player_day`) plus target-spezifische Feature-Views fuer Spielt, Punkte, Marktwert.
-- Wettquoten als zusaetzliche Bronze-Quelle einplanen (spaeterer Join in Silver/Gold).
+- V0.9 Silver: zwei Tabellen bauen (`silver.player_snapshot`, `silver.team_matchup_snapshot`) mit sauberem Join aus Kickbase, LigaInsider und Odds.
+- Stabile Player-ID in Silver: eigener fortlaufender `player_uid` mit persistenter Mapping-Historie.
+- Wettquoten sind in Bronze aktiv (`odds_match_snapshot`); naechster Schritt ist der robuste Team/Fixture-Join in Silver/Gold.
 - V1.0 Modelle: Kalibrierung StartProbability, MW Forecast (`delta_7d`), Opponent/Team-Strength Features, Backtesting-Haertung.
