@@ -29,8 +29,10 @@ export PATH="$HOME/.databricks/bin:$PATH"
 Auth einrichten:
 
 ```bash
-databricks auth login --host "https://<dein-workspace-host>"
+databricks auth login --host "https://<dein-workspace-host>.cloud.databricks.com"
 ```
+
+Wichtig: Host ohne `/browse?...` und ohne Query-Parameter eingeben.
 
 Profile pruefen:
 
@@ -62,6 +64,16 @@ python3 -m scripts.databricks.update_jobs_to_repo \
   --profile "<DATABRICKS_PROFILE>" \
   --job-ids "<bronze_job_id>,<silver_job_id>,<gold_job_id>"
 ```
+
+Alternative: Jobs direkt anlegen oder idempotent aktualisieren:
+
+```bash
+python3 -m scripts.databricks.create_lakehouse_jobs \
+  --repo-path "/Repos/<user>/kickbase-analyzer" \
+  --profile "<DATABRICKS_PROFILE>"
+```
+
+Das Skript gibt am Ende `DATABRICKS_JOB_ID_BRONZE`, `..._SILVER`, `..._GOLD` aus.
 
 ## 3) Regelmaessiger Databricks Sync + Job Run
 
@@ -101,6 +113,9 @@ python3 -m scripts.databricks.run_lakehouse_jobs \
 
 ### 4.1 Google Cloud CLI installieren
 Siehe offizielles Install-HowTo fuer dein OS.
+
+Hinweis fuer WSL: Eine Installation in Windows PowerShell reicht in WSL nicht.
+Wenn du die Skripte in WSL startest, muessen `gcloud` und `bq` auch in WSL installiert sein.
 
 ### 4.2 Auth setzen
 Interaktiv:

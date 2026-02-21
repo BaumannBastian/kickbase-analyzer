@@ -41,6 +41,7 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - [x] Databricks Job Skeleton: bronze_ingest, silver_sync, gold_features
 - [x] Erste Silver Tables (dim_player, map_player_source)
 - [x] Erste Gold Feature Table (feat_player_daily)
+- [x] Databricks Workspace Jobs fuer kickbase_bronze/silver/gold erstellt
 
 ### Definition of Done
 - Job-Pipeline einmal end-to-end auf Demo-Daten erfolgreich

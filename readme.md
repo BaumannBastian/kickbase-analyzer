@@ -195,6 +195,7 @@ BigQuery CLI Runner:
 
 Databricks Repo/Job Runner:
 - `python3 -m scripts.databricks.sync_repo --repo-path \"/Repos/<user>/kickbase-analyzer\" --branch main`
+- `python3 -m scripts.databricks.create_lakehouse_jobs --repo-path \"/Repos/<user>/kickbase-analyzer\" --profile \"<profile>\"`
 - `python3 -m scripts.databricks.run_lakehouse_jobs --stage all --job-id-bronze <id> --job-id-silver <id> --job-id-gold <id>`
 
 ---

@@ -303,6 +303,7 @@ kickbase-analyzer/
 - [x] Bronze ingest job: load raw files to Delta (lokales Job-Skeleton + Lakehouse Bronze Snapshot Layout)
 - [x] Silver sync job: identity + canonical tables (lokales Job-Skeleton)
 - [x] Gold job: feature tables + points_components skeleton (lokales Job-Skeleton)
+- [x] Databricks Workspace Jobs (kickbase_bronze/silver/gold) per CLI angelegt und auf Repo-Notebooks verdrahtet
 
 ### MVP-3 (local ML baseline + backtesting)
 - [x] StartProbability baseline (regelbasiertes Baseline-Modell im Gold-Job)
