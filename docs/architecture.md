@@ -311,9 +311,9 @@ kickbase-analyzer/
 - [ ] Backtesting harness (matchday aligned)
 
 ### MVP-4 (BigQuery + Power BI)
-- [ ] RAW loader
-- [ ] CORE transformations
-- [x] MARTS views (lokaler Prototype-Builder aus Gold-Snapshots)
+- [x] RAW loader (JSONL Export + bq CLI Upload Script)
+- [x] CORE transformations (BigQuery SQL Views + Apply Script)
+- [x] MARTS views (lokaler Prototype-Builder + BigQuery SQL Views)
 - [ ] Power BI dashboards v0 (leaderboard + breakdown + MW + risk)
 
 ### v1+

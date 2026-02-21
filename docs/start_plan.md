@@ -46,12 +46,14 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 - Job-Pipeline einmal end-to-end auf Demo-Daten erfolgreich
 - Schema-Pruefung gegen Contract Dokumentation
 
-## Sprint D
+## Sprint D (in Umsetzung)
 
 ### Deliverables
-- ML Baselines (StartProbability, ExpectedPointsNextMatchday)
-- Risk Outputs (p10/p50/p90, stddev, p_dnp)
-- BigQuery MARTS v0 fuer Power BI
+- [x] ML Baselines (StartProbability, ExpectedPointsNextMatchday)
+- [x] Risk-Basisoutputs (p10/p50/p90, stddev, p_dnp)
+- [x] BigQuery RAW Loader + CORE/MARTS View-Skripte
+- [ ] Risk Outputs via Monte-Carlo
+- [ ] BigQuery MARTS v0 mit echten Cloud-Runs
 
 ### Definition of Done
 - Backtesting Report fuer mindestens eine historische Periode

@@ -1,0 +1,130 @@
+# ------------------------------------
+# load_raw_with_bq_cli.py
+#
+# Dieses Skript laedt RAW JSONL Exporte per bq CLI nach BigQuery.
+#
+# Outputs
+# ------------------------------------
+# 1) BigQuery Tabellen in <project>.<dataset>
+#
+# Usage
+# ------------------------------------
+# - python -m bigquery.raw_load.load_raw_with_bq_cli --project <project> --dataset kickbase_raw
+# - python -m bigquery.raw_load.load_raw_with_bq_cli --project <project> --dataset kickbase_raw --write-disposition truncate
+# ------------------------------------
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+from typing import Sequence
+
+
+TABLE_FILE_MAP = {
+    "feat_player_daily": "feat_player_daily.jsonl",
+    "points_components_matchday": "points_components_matchday.jsonl",
+    "quality_metrics": "quality_metrics.jsonl",
+}
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Load RAW JSONL exports into BigQuery via bq CLI.")
+    parser.add_argument("--project", type=str, default=None)
+    parser.add_argument("--dataset", type=str, default="kickbase_raw")
+    parser.add_argument("--location", type=str, default="EU")
+    parser.add_argument("--input-dir", type=Path, default=Path("data/warehouse/raw"))
+    parser.add_argument("--write-disposition", choices=["append", "truncate"], default="append")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+
+def require_bq_cli() -> str:
+    bq_path = shutil.which("bq")
+    if bq_path is None:
+        raise RuntimeError("bq CLI not found in PATH.")
+    return bq_path
+
+
+def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
+    print(">>", " ".join(cmd))
+    if dry_run:
+        return
+    proc = subprocess.run(cmd)
+    if proc.returncode != 0:
+        raise SystemExit(proc.returncode)
+
+
+def ensure_dataset(project: str, dataset: str, location: str, *, dry_run: bool) -> None:
+    cmd = [
+        "bq",
+        f"--location={location}",
+        f"--project_id={project}",
+        "mk",
+        "--dataset",
+        "--if_not_exists",
+        f"{project}:{dataset}",
+    ]
+    run_cmd(cmd, dry_run=dry_run)
+
+
+def load_table(
+    *,
+    project: str,
+    dataset: str,
+    table: str,
+    path: Path,
+    write_disposition: str,
+    dry_run: bool,
+) -> None:
+    table_ref = f"{project}:{dataset}.{table}"
+    cmd = [
+        "bq",
+        f"--project_id={project}",
+        "load",
+        "--autodetect",
+        "--source_format=NEWLINE_DELIMITED_JSON",
+    ]
+
+    if write_disposition == "truncate":
+        cmd.append("--replace")
+
+    cmd += [table_ref, str(path)]
+    run_cmd(cmd, dry_run=dry_run)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    project = args.project or os.environ.get("BQ_PROJECT_ID", "").strip()
+    if not project:
+        raise ValueError("Missing BQ project. Use --project or BQ_PROJECT_ID.")
+
+    if args.dry_run:
+        if shutil.which("bq") is None:
+            print("bq CLI not found; continuing in --dry-run mode.")
+    else:
+        require_bq_cli()
+    ensure_dataset(project, args.dataset, args.location, dry_run=args.dry_run)
+
+    for table, filename in TABLE_FILE_MAP.items():
+        file_path = args.input_dir / filename
+        if not file_path.exists():
+            print(f"Skip {table}: missing file {file_path}")
+            continue
+        load_table(
+            project=project,
+            dataset=args.dataset,
+            table=table,
+            path=file_path,
+            write_disposition=args.write_disposition,
+            dry_run=args.dry_run,
+        )
+
+    print("BigQuery RAW load finished.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

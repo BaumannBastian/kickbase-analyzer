@@ -39,6 +39,9 @@ kickbase-bronze-ingest = "databricks.jobs.bronze_ingest.run_bronze_ingest:main"
 kickbase-silver-sync = "databricks.jobs.silver_sync.run_silver_sync:main"
 kickbase-gold-features = "databricks.jobs.gold_features.run_gold_features:main"
 kickbase-build-marts = "bigquery.marts.build_marts_local:main"
+kickbase-prepare-raw-exports = "bigquery.raw_load.prepare_raw_exports:main"
+kickbase-bq-load-raw = "bigquery.raw_load.load_raw_with_bq_cli:main"
+kickbase-bq-apply-views = "bigquery.core_transform.apply_views_with_bq_cli:main"
 
 [tool.setuptools]
 packages = [
@@ -48,6 +51,8 @@ packages = [
   "databricks.jobs.silver_sync",
   "databricks.jobs.gold_features",
   "bigquery",
+  "bigquery.raw_load",
+  "bigquery.core_transform",
   "bigquery.marts",
   "local_ingestion",
   "local_ingestion.core",

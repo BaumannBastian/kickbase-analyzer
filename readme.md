@@ -78,6 +78,7 @@ Power BI Visuals:
 - docs/compliance.md
 - docs/start_plan.md
 - docs/external_tools.md
+- docs/setup_databricks_bigquery.md
 
 ---
 
@@ -170,6 +171,8 @@ Siehe docs/architecture.md für die vollständige Struktur.
    `data/bronze/*.ndjson`
 11) Externe Toolchain prüfen  
    `./scripts/check_external_tools.sh`
+12) Databricks + BigQuery Setup (Step-by-Step)  
+   `docs/setup_databricks_bigquery.md`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
 
@@ -177,6 +180,22 @@ Bewertbarer Output (Demo) liegt nach Pipeline-Run in:
 - `data/marts/mart_player_leaderboard_<timestamp>.csv`
 - `data/marts/mart_points_breakdown_<timestamp>.csv`
 - `data/marts/mart_risk_overview_<timestamp>.csv`
+
+BigQuery RAW Exporte (fuer Upload) liegen in:
+- `data/warehouse/raw/feat_player_daily.jsonl`
+- `data/warehouse/raw/points_components_matchday.jsonl`
+- `data/warehouse/raw/quality_metrics.jsonl`
+- `data/warehouse/raw/manifest.json`
+
+BigQuery CLI Runner:
+- `./scripts/bigquery/run_prepare_raw_exports.sh`
+- `./scripts/bigquery/run_load_raw_bq.sh --project <gcp_project_id>`
+- `./scripts/bigquery/run_apply_views_bq.sh --project <gcp_project_id>`
+- `./scripts/bigquery/run_bigquery_pipeline.sh --project <gcp_project_id>`
+
+Databricks Repo/Job Runner:
+- `python3 -m scripts.databricks.sync_repo --repo-path \"/Repos/<user>/kickbase-analyzer\" --branch main`
+- `python3 -m scripts.databricks.run_lakehouse_jobs --stage all --job-id-bronze <id> --job-id-silver <id> --job-id-gold <id>`
 
 ---
 
