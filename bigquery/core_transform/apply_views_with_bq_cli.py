@@ -126,6 +126,7 @@ def run_query(
         f"--location={location}",
         "query",
         "--use_legacy_sql=false",
+        "--",
         sql,
     ]
     run_cmd(cmd, dry_run=dry_run)
