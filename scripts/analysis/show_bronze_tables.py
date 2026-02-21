@@ -74,6 +74,7 @@ ODDS_COLUMNS = [
     "totals_line",
     "totals_over_odds",
     "totals_under_odds",
+    "totals_available_line_count",
     "bookmaker_count",
 ]
 

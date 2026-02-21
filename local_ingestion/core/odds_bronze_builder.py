@@ -73,6 +73,53 @@ def _normalize_probability(*odds_values: float | None) -> list[float | None]:
     return normalized
 
 
+def _select_totals_line(
+    totals_by_point: dict[float, dict[str, list[float]]],
+) -> tuple[float | None, float | None, float | None]:
+    """Waehlt die ausgeglichenste O/U-Linie aus den verfuegbaren Punkten."""
+    if not totals_by_point:
+        return None, None, None
+
+    candidates: list[tuple[float, float | None, float | None, int, float, float]] = []
+    for point, payload in totals_by_point.items():
+        over_odds = _median_or_none(payload["over"])
+        under_odds = _median_or_none(payload["under"])
+        sample_count = len(payload["over"]) + len(payload["under"])
+
+        # Bevorzugt Punkte mit beiden Seiten und moeglichst ausgeglichenen Wahrscheinlichkeiten.
+        if over_odds and under_odds and over_odds > 0 and under_odds > 0:
+            over_prob = 1.0 / over_odds
+            under_prob = 1.0 / under_odds
+            balance_gap = abs(over_prob - under_prob)
+            even_price_gap = abs(((over_odds + under_odds) / 2.0) - 2.0)
+        else:
+            balance_gap = float("inf")
+            even_price_gap = float("inf")
+
+        candidates.append(
+            (
+                point,
+                over_odds,
+                under_odds,
+                sample_count,
+                balance_gap,
+                even_price_gap,
+            )
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            0 if item[1] is not None and item[2] is not None else 1,
+            item[4],
+            item[5],
+            -item[3],
+            abs(item[0] - 2.5),
+        )
+    )
+    selected_point, over_odds, under_odds, _, _, _ = candidates[0]
+    return round(float(selected_point), 2), over_odds, under_odds
+
+
 def build_odds_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
@@ -153,22 +200,8 @@ def build_odds_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         h2h_away_odds = _median_or_none(away_prices)
         h2h_probs = _normalize_probability(h2h_home_odds, h2h_draw_odds, h2h_away_odds)
 
-        totals_line: float | None = None
-        totals_over_odds: float | None = None
-        totals_under_odds: float | None = None
-
-        if totals_by_point:
-            candidate_points = sorted(
-                totals_by_point.items(),
-                key=lambda item: (
-                    abs(item[0] - 2.5),
-                    -(len(item[1]["over"]) + len(item[1]["under"])),
-                ),
-            )
-            selected_point, payload = candidate_points[0]
-            totals_line = round(float(selected_point), 2)
-            totals_over_odds = _median_or_none(payload["over"])
-            totals_under_odds = _median_or_none(payload["under"])
+        totals_line, totals_over_odds, totals_under_odds = _select_totals_line(totals_by_point)
+        totals_available_lines = sorted(round(float(point), 2) for point in totals_by_point)
 
         totals_probs = _normalize_probability(totals_over_odds, totals_under_odds)
 
@@ -191,6 +224,8 @@ def build_odds_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "totals_line": totals_line,
                 "totals_over_odds": totals_over_odds,
                 "totals_under_odds": totals_under_odds,
+                "totals_available_line_count": len(totals_available_lines),
+                "totals_available_lines": totals_available_lines,
                 "totals_over_implied_prob": totals_probs[0],
                 "totals_under_implied_prob": totals_probs[1],
                 "raw_event": event,

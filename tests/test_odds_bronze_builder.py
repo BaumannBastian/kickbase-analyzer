@@ -75,6 +75,8 @@ class OddsBronzeBuilderTests(unittest.TestCase):
         self.assertEqual(row["totals_line"], 2.5)
         self.assertAlmostEqual(float(row["totals_over_odds"]), 1.9, places=2)
         self.assertAlmostEqual(float(row["totals_under_odds"]), 1.95, places=2)
+        self.assertEqual(row["totals_available_line_count"], 1)
+        self.assertEqual(row["totals_available_lines"], [2.5])
 
         implied_sum = (
             float(row["h2h_home_implied_prob"])
@@ -82,6 +84,55 @@ class OddsBronzeBuilderTests(unittest.TestCase):
             + float(row["h2h_away_implied_prob"])
         )
         self.assertAlmostEqual(implied_sum, 1.0, places=5)
+
+    def test_selects_balanced_totals_line_when_multiple_points_exist(self) -> None:
+        events = [
+            {
+                "id": "event_2",
+                "sport_key": "soccer_germany_bundesliga",
+                "sport_title": "Soccer Bundesliga",
+                "commence_time": "2026-03-08T14:30:00Z",
+                "home_team": "FC C",
+                "away_team": "FC D",
+                "bookmakers": [
+                    {
+                        "key": "book_a",
+                        "markets": [
+                            {
+                                "key": "totals",
+                                "outcomes": [
+                                    {"name": "Over", "price": 1.45, "point": 2.5},
+                                    {"name": "Under", "price": 2.75, "point": 2.5},
+                                    {"name": "Over", "price": 2.15, "point": 3.5},
+                                    {"name": "Under", "price": 1.75, "point": 3.5},
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "key": "book_b",
+                        "markets": [
+                            {
+                                "key": "totals",
+                                "outcomes": [
+                                    {"name": "Over", "price": 1.5, "point": 2.5},
+                                    {"name": "Under", "price": 2.6, "point": 2.5},
+                                    {"name": "Over", "price": 2.2, "point": 3.5},
+                                    {"name": "Under", "price": 1.7, "point": 3.5},
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+
+        rows = build_odds_rows(events)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["totals_available_line_count"], 2)
+        self.assertEqual(row["totals_available_lines"], [2.5, 3.5])
+        self.assertEqual(row["totals_line"], 3.5)
 
 
 if __name__ == "__main__":
