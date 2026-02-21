@@ -117,6 +117,19 @@ Siehe offizielles Install-HowTo fuer dein OS.
 Hinweis fuer WSL: Eine Installation in Windows PowerShell reicht in WSL nicht.
 Wenn du die Skripte in WSL startest, muessen `gcloud` und `bq` auch in WSL installiert sein.
 
+Ubuntu/WSL Beispiel:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+  | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+  | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y google-cloud-cli
+```
+
 ### 4.2 Auth setzen
 Interaktiv:
 
