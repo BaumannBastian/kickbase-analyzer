@@ -41,11 +41,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def require_bq_cli() -> str:
-    bq_path = shutil.which("bq")
-    if bq_path is None:
-        raise RuntimeError("bq CLI not found in PATH.")
-    return bq_path
+def resolve_bq_cli() -> str:
+    override = os.environ.get("BQ_CLI_PATH", "").strip()
+    if override:
+        return override
+
+    for candidate in ("bq", "bq.cmd"):
+        bq_path = shutil.which(candidate)
+        if bq_path is not None:
+            return bq_path
+
+    local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_appdata:
+        fallback = Path(local_appdata) / "Google" / "Cloud SDK" / "google-cloud-sdk" / "bin" / "bq.cmd"
+        if fallback.exists():
+            return str(fallback)
+
+    raise RuntimeError("bq CLI not found in PATH. Set BQ_CLI_PATH or add bq/bq.cmd to PATH.")
 
 
 def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
@@ -57,9 +69,16 @@ def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
         raise SystemExit(proc.returncode)
 
 
-def ensure_dataset(project: str, dataset: str, location: str, *, dry_run: bool) -> None:
+def ensure_dataset(
+    project: str,
+    dataset: str,
+    location: str,
+    *,
+    bq_cli: str,
+    dry_run: bool,
+) -> None:
     cmd = [
-        "bq",
+        bq_cli,
         f"--location={location}",
         f"--project_id={project}",
         "mk",
@@ -77,11 +96,12 @@ def load_table(
     table: str,
     path: Path,
     write_disposition: str,
+    bq_cli: str,
     dry_run: bool,
 ) -> None:
     table_ref = f"{project}:{dataset}.{table}"
     cmd = [
-        "bq",
+        bq_cli,
         f"--project_id={project}",
         "load",
         "--autodetect",
@@ -102,11 +122,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("Missing BQ project. Use --project or BQ_PROJECT_ID.")
 
     if args.dry_run:
-        if shutil.which("bq") is None:
+        try:
+            bq_cli = resolve_bq_cli()
+        except RuntimeError:
+            bq_cli = "bq"
             print("bq CLI not found; continuing in --dry-run mode.")
     else:
-        require_bq_cli()
-    ensure_dataset(project, args.dataset, args.location, dry_run=args.dry_run)
+        bq_cli = resolve_bq_cli()
+    ensure_dataset(
+        project,
+        args.dataset,
+        args.location,
+        bq_cli=bq_cli,
+        dry_run=args.dry_run,
+    )
 
     for table, filename in TABLE_FILE_MAP.items():
         file_path = args.input_dir / filename
@@ -119,6 +148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             table=table,
             path=file_path,
             write_disposition=args.write_disposition,
+            bq_cli=bq_cli,
             dry_run=args.dry_run,
         )
 
