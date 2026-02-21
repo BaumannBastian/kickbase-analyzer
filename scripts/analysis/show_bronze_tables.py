@@ -142,8 +142,12 @@ def _filter_rows_by_player(rows: list[dict[str, Any]], player_filter: str | None
     needle = player_filter.strip().lower()
     filtered: list[dict[str, Any]] = []
     for row in rows:
-        name = str(row.get("player_name", "")).strip().lower()
-        if needle in name:
+        searchable_fields = [
+            str(row.get("player_name", "")).strip().lower(),
+            str(row.get("home_team", "")).strip().lower(),
+            str(row.get("away_team", "")).strip().lower(),
+        ]
+        if any(needle in field for field in searchable_fields if field):
             filtered.append(row)
     return filtered
 
