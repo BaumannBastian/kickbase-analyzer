@@ -52,8 +52,9 @@ Schneller Projektstart mit sofort lauffaehigen Ergebnissen, aber mit Test- und C
 ### Deliverables
 - [x] ML Baselines (StartProbability, ExpectedPointsNextMatchday)
 - [x] Risk-Basisoutputs (p10/p50/p90, stddev, p_dnp)
+- [x] Risk Outputs via Monte-Carlo
 - [x] BigQuery RAW Loader + CORE/MARTS View-Skripte
-- [ ] Risk Outputs via Monte-Carlo
+- [x] Backtesting Harness (matchday aligned)
 - [ ] BigQuery MARTS v0 mit echten Cloud-Runs
 
 ### Definition of Done

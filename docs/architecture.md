@@ -308,8 +308,8 @@ kickbase-analyzer/
 ### MVP-3 (local ML baseline + backtesting)
 - [x] StartProbability baseline (regelbasiertes Baseline-Modell im Gold-Job)
 - [x] ExpectedPointsNextMatchday baseline + breakdown table
-- [ ] Risk via simple Monte Carlo
-- [ ] Backtesting harness (matchday aligned)
+- [x] Risk via simple Monte Carlo
+- [x] Backtesting harness (matchday aligned)
 
 ### MVP-4 (BigQuery + Power BI)
 - [x] RAW loader (JSONL Export + bq CLI Upload Script)

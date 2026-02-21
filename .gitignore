@@ -30,6 +30,7 @@ data/bronze/*.json
 data/cache/
 data/lakehouse/
 data/marts/
+data/backtesting/
 data/warehouse/
 
 # OS/editor

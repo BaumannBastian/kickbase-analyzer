@@ -66,6 +66,8 @@ class JobsPipelineTests(unittest.TestCase):
             self.assertIn("player_name", preview)
             self.assertIn("expected_points_next_matchday", preview)
             self.assertIn("value_score", preview)
+            self.assertEqual(preview.get("risk_method"), "monte_carlo_v1")
+            self.assertGreaterEqual(int(preview.get("monte_carlo_samples", 0)), 100)
 
 
 if __name__ == "__main__":

@@ -163,15 +163,17 @@ Siehe docs/architecture.md für die vollständige Struktur.
    `./scripts/run_build_marts_local.sh`
 7) End-to-End in einem Lauf  
    `./scripts/run_pipeline_demo.sh`
-8) Tests ausführen  
+8) Backtesting-Report erzeugen  
+   `./scripts/run_backtesting.sh`
+9) Tests ausführen  
    `./scripts/test.sh`
-9) Lint/Compile-Check  
+10) Lint/Compile-Check  
    `./scripts/lint.sh`
-10) Bronze-Outputs prüfen  
+11) Bronze-Outputs prüfen  
    `data/bronze/*.ndjson`
-11) Externe Toolchain prüfen  
+12) Externe Toolchain prüfen  
    `./scripts/check_external_tools.sh`
-12) Databricks + BigQuery Setup (Step-by-Step)  
+13) Databricks + BigQuery Setup (Step-by-Step)  
    `docs/setup_databricks_bigquery.md`
 
 Hinweis: `private` mode ist implementiert und benoetigt eine korrekte `.env` Konfiguration.
@@ -180,6 +182,8 @@ Bewertbarer Output (Demo) liegt nach Pipeline-Run in:
 - `data/marts/mart_player_leaderboard_<timestamp>.csv`
 - `data/marts/mart_points_breakdown_<timestamp>.csv`
 - `data/marts/mart_risk_overview_<timestamp>.csv`
+- `data/backtesting/backtest_summary_<timestamp>.csv`
+- `data/backtesting/backtest_errors_<timestamp>.csv`
 
 BigQuery RAW Exporte (fuer Upload) liegen in:
 - `data/warehouse/raw/feat_player_daily.jsonl`

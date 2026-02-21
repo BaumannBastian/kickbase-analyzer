@@ -16,14 +16,18 @@
 # ------------------------------------
 # - python -m databricks.jobs.gold_features.run_gold_features
 # - python -m databricks.jobs.gold_features.run_gold_features --timestamp 2026-02-21T131500Z
+# - python -m databricks.jobs.gold_features.run_gold_features --mc-samples 1000
 # ------------------------------------
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
+import random
+import statistics
 from typing import Any, Sequence
 
 from databricks.jobs.common_io import (
@@ -46,6 +50,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lakehouse-silver-dir", type=Path, default=Path("data/lakehouse/silver"))
     parser.add_argument("--lakehouse-gold-dir", type=Path, default=Path("data/lakehouse/gold"))
     parser.add_argument("--timestamp", type=str, default=None)
+    parser.add_argument("--mc-samples", type=int, default=400)
     return parser.parse_args(argv)
 
 
@@ -117,11 +122,84 @@ def _latest_match_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return latest
 
 
+def _stable_seed(*parts: str) -> int:
+    joined = "|".join(parts)
+    digest = hashlib.sha256(joined.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=False)
+
+
+def _quantile(sorted_values: list[float], q: float) -> float:
+    if not sorted_values:
+        return 0.0
+    if q <= 0.0:
+        return sorted_values[0]
+    if q >= 1.0:
+        return sorted_values[-1]
+
+    idx = (len(sorted_values) - 1) * q
+    lo = int(math.floor(idx))
+    hi = int(math.ceil(idx))
+    if lo == hi:
+        return sorted_values[lo]
+
+    weight = idx - lo
+    return sorted_values[lo] * (1.0 - weight) + sorted_values[hi] * weight
+
+
+def _simulate_points_distribution(
+    *,
+    start_prob: float,
+    raw_points_recent: float,
+    scorer_prob: float,
+    team_win_prob: float,
+    card_risk: float,
+    samples: int,
+    seed: int,
+) -> dict[str, float]:
+    safe_samples = max(100, samples)
+    rng = random.Random(seed)
+
+    base_mean = raw_points_recent * 0.78
+    base_std = max(4.0, math.sqrt(max(raw_points_recent, 1.0)) * 0.9)
+
+    draws: list[float] = []
+    for _ in range(safe_samples):
+        starts = rng.random() < start_prob
+        if not starts:
+            draws.append(0.0)
+            continue
+
+        base_component = max(0.0, rng.gauss(base_mean, base_std))
+        scorer_component = 14.0 if rng.random() < scorer_prob else 0.0
+        win_component = 6.0 if rng.random() < team_win_prob else 0.0
+        minutes_component = 4.0
+        cards_component = -4.0 if rng.random() < card_risk else 0.0
+
+        total_points = max(
+            0.0,
+            base_component + scorer_component + win_component + minutes_component + cards_component,
+        )
+        draws.append(total_points)
+
+    draws.sort()
+    mean_points = statistics.fmean(draws)
+    stddev_points = statistics.pstdev(draws) if len(draws) > 1 else 0.0
+
+    return {
+        "mean_points": mean_points,
+        "stddev_points": stddev_points,
+        "p10_points": _quantile(draws, 0.10),
+        "p50_points": _quantile(draws, 0.50),
+        "p90_points": _quantile(draws, 0.90),
+    }
+
+
 def run_gold_features(
     lakehouse_silver_dir: Path,
     lakehouse_gold_dir: Path,
     *,
     timestamp: str | None = None,
+    mc_samples: int = 400,
 ) -> dict[str, object]:
     selected_timestamp = timestamp or latest_timestamp_common_partitioned(
         lakehouse_silver_dir,
@@ -178,12 +256,21 @@ def run_gold_features(
         minutes_bonus_ev = start_prob * 4.0
         cards_negative_ev = -start_prob * card_risk * 4.0
 
-        pred_total = base_raw_ev + scorer_ev + win_ev + minutes_bonus_ev + cards_negative_ev
+        mc_summary = _simulate_points_distribution(
+            start_prob=start_prob,
+            raw_points_recent=raw_points_recent,
+            scorer_prob=scorer_prob,
+            team_win_prob=team_win_prob,
+            card_risk=card_risk,
+            samples=mc_samples,
+            seed=_stable_seed(player_uid, selected_timestamp),
+        )
 
-        stddev_points = max(6.0, math.sqrt(max(raw_points_recent, 1.0)) * (1.25 - 0.45 * start_prob))
-        p50_points = pred_total
-        p10_points = max(0.0, pred_total - 1.2816 * stddev_points)
-        p90_points = pred_total + 1.2816 * stddev_points
+        pred_total = mc_summary["mean_points"]
+        stddev_points = mc_summary["stddev_points"]
+        p10_points = mc_summary["p10_points"]
+        p50_points = mc_summary["p50_points"]
+        p90_points = mc_summary["p90_points"]
 
         market_value = _to_float(daily.get("market_value"), 0.0)
         expected_mv_change_1d = market_value * ((pred_total - 50.0) / 1000.0)
@@ -207,6 +294,8 @@ def run_gold_features(
             "p10_points": round(p10_points, 3),
             "p50_points": round(p50_points, 3),
             "p90_points": round(p90_points, 3),
+            "risk_method": "monte_carlo_v1",
+            "monte_carlo_samples": max(100, int(mc_samples)),
             "market_value": round(market_value, 2),
             "expected_marketvalue_next_matchday": round(expected_mv_next, 2),
             "expected_marketvalue_change_7d": round(expected_mv_change_7d, 2),
@@ -247,6 +336,11 @@ def run_gold_features(
             "value": round(players_with_li_fields / max(len(feat_player_daily), 1), 4),
             "timestamp": selected_timestamp,
         },
+        {
+            "metric": "risk_mc_samples",
+            "value": max(100, int(mc_samples)),
+            "timestamp": selected_timestamp,
+        },
     ]
 
     output_tables = {
@@ -268,6 +362,7 @@ def run_gold_features(
     return {
         "status": "success",
         "timestamp": selected_timestamp,
+        "mc_samples": max(100, int(mc_samples)),
         "rows_written": rows_written,
         "tables_written": sorted(output_tables.keys()),
         "files_written": files_written,
@@ -280,6 +375,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.lakehouse_silver_dir,
         args.lakehouse_gold_dir,
         timestamp=args.timestamp,
+        mc_samples=args.mc_samples,
     )
     print(json.dumps(summary, ensure_ascii=True, indent=2, sort_keys=True))
     return 0

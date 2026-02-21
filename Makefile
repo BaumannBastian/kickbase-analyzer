@@ -6,7 +6,7 @@
 
 PYTHON ?= python3
 
-.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline
+.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline
 
 test:
 	./scripts/test.sh
@@ -34,6 +34,9 @@ run-build-marts-local:
 
 run-pipeline-demo:
 	./scripts/run_pipeline_demo.sh
+
+run-backtesting:
+	./scripts/run_backtesting.sh
 
 run-bq-raw-export:
 	./scripts/bigquery/run_prepare_raw_exports.sh
