@@ -138,6 +138,36 @@ class LigaInsiderScraperTests(unittest.TestCase):
         self.assertEqual(by_slug["gregor-kobel"]["player_name"], "Gregor Kobel")
         self.assertEqual(by_slug["julian-brandt"]["predicted_lineup"], "starter")
 
+    def test_parse_rows_from_team_page_with_sub_child_competitors(self) -> None:
+        html_text = """
+        <div class="player_position_row player_position_row2 text-center">
+          <div class="player_position_column center-block">
+            <div class="sub_child" style="display: block;">
+              <div class="player_position_photo">
+                <div class="sub_pic"><a href="/leonidas-stergiou_36303/"><img alt="" /></a></div>
+                <div class="player_no img-circle"><div class="next_sub"><span class="next_sub_button"></span></div></div>
+              </div>
+              <div class="player_name"><a href="/leonidas-stergiou_36303/">Stergiou</a></div>
+            </div>
+            <div class="sub_child" style="display: none;">
+              <div class="player_position_photo">
+                <div class="sub_pic"><a href="/marnon-busch_3599/"><img alt="" /></a></div>
+                <div class="player_no img-circle"><div class="next_sub"><span class="prev_sub_button"></span></div></div>
+              </div>
+              <div class="player_name"><a href="/marnon-busch_3599/">Busch</a></div>
+            </div>
+          </div>
+        </div>
+        <div class="league_name_holder"></div>
+        """
+        rows = LigaInsiderScraper.parse_status_rows(html_text)
+        self.assertEqual(len(rows), 2)
+        by_slug = {str(row["ligainsider_player_slug"]): row for row in rows}
+        self.assertEqual(by_slug["leonidas-stergiou"]["competition_player_names"], ["Busch"])
+        self.assertEqual(by_slug["leonidas-stergiou"]["competition_player_count"], 1)
+        self.assertEqual(by_slug["marnon-busch"]["competition_player_names"], ["Stergiou"])
+        self.assertEqual(by_slug["marnon-busch"]["competition_player_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -271,12 +271,30 @@ def _extract_playing_stats(
         if started:
             starts_hist += 1
 
+    # Kickbase liefert typischerweise die beiden Counter `smc`/`ismc`.
+    # Beobachtung in Live-Daten: `starts <= appearances`.
+    # Deshalb wird das Paar defensiv ueber min/max aufgeloest.
+    smc_count = _to_int(_first_number(details_payload, ["smc"]))
+    ismc_count = _to_int(_first_number(details_payload, ["ismc"]))
+
     appearances_details = _to_int(
-        _first_number(details_payload, ["smc", "appearances", "apps", "matches", "games"])
+        _first_number(details_payload, ["appearances", "apps", "matches", "games"])
     )
     starts_details = _to_int(
-        _first_number(details_payload, ["ismc", "starts", "s11", "starting_eleven", "startelf"])
+        _first_number(details_payload, ["starts", "s11", "starting_eleven", "startelf"])
     )
+
+    if smc_count is not None and ismc_count is not None:
+        derived_starts = min(smc_count, ismc_count)
+        derived_appearances = max(smc_count, ismc_count)
+    else:
+        derived_starts = smc_count
+        derived_appearances = ismc_count
+
+    if starts_details is None:
+        starts_details = derived_starts
+    if appearances_details is None:
+        appearances_details = derived_appearances
 
     total_minutes = _first_number(
         details_payload,

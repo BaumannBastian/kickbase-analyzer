@@ -40,6 +40,23 @@ def _safe_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _safe_name_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = _safe_text(item)
+        if not text:
+            continue
+        norm = _normalize_name(text)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        out.append(text)
+    return out
+
+
 def _to_iso_utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -148,6 +165,24 @@ def build_ligainsider_rows(
         team_id = _safe_text(row.get("kickbase_team_id"))
         position = _safe_text(row.get("kickbase_position"))
         team_slug = _safe_text(row.get("ligainsider_team_slug"))
+        row_name_norm = _normalize_name(_safe_text(row.get("player_name")))
+
+        explicit_competitors = [
+            name
+            for name in _safe_name_list(row.get("competition_player_names"))
+            if _normalize_name(name) != row_name_norm
+        ]
+
+        if isinstance(row.get("competition_player_names"), list):
+            row["competition_player_names"] = explicit_competitors
+            row["has_position_competition"] = len(explicit_competitors) > 0
+            row["competition_player_count"] = len(explicit_competitors)
+            row["competition_scope"] = "ligainsider_column"
+            row["competition_risk"] = _competition_risk_label(
+                is_in_lineup=bool(row.get("is_in_lineup")),
+                competitor_count=len(explicit_competitors),
+            )
+            continue
 
         peers: list[dict[str, Any]] = []
         competition_scope = "none"

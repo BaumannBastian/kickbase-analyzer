@@ -328,12 +328,12 @@ kickbase-analyzer/
 - [ ] Power BI dashboards v0 (leaderboard + breakdown + MW + risk)
 
 ### V1.0 (Data Quality + Modeling Upgrade)
-- [ ] Kickbase Feldmapping validieren (`smc` vs `ismc`) und `average_minutes` korrekt auf Einsaetzen statt Starts berechnen (inkl. Guard gegen Division durch 0).
+- [x] Kickbase Feldmapping validieren (`smc` vs `ismc`) und `average_minutes` korrekt auf Einsaetzen statt Starts berechnen (inkl. Guard gegen Division durch 0).
 - [ ] Kickbase `team_id` Mapping dokumentieren und in eine Team-Dimension ueberfuehren (`kickbase_team_id` -> club_name, season, canonical_team_uid), damit IDs >18 nachvollziehbar sind.
 - [ ] Marktwert-Historie in Bronze vervollstaendigen: 10-Tage-Tuples pro Spieler, `market_value_high_365d`, `market_value_low_365d` aus echter Historie statt Current-Value-Fallback.
 - [ ] Fallback-Strategie fuer Marktwert-Historie implementieren, falls kein dedizierter API-Endpunkt verfuegbar ist (Historisierung aus taeglichen Snapshots).
-- [ ] LigaInsider Konkurrenz-Extraktion auf UI-Logik umstellen: Positions-Kandidaten ueber den gruennen Pfeil/Carousel pro Spieler erfassen.
-- [ ] LigaInsider Felder `competition_player_count` und `competition_player_names` gegen die echte Positionskonkurrenz validieren (Regression-Tests + Sample-basierte QA).
+- [x] LigaInsider Konkurrenz-Extraktion auf UI-Logik umstellen: Positions-Kandidaten ueber den gruennen Pfeil/Carousel pro Spieler erfassen.
+- [x] LigaInsider Felder `competition_player_count` und `competition_player_names` gegen die echte Positionskonkurrenz validieren (Regression-Tests + Sample-basierte QA).
 - [ ] Silver-Datenmodell fuer 3 Targets finalisieren: `plays_next_match`, `expected_market_value_t+h`, `expected_points_next/rest`.
 - [ ] Silver als eine kanonische Joined-Base (`player_day`) mit zusaetzlichen target-spezifischen Feature-Views aufbauen (statt isolierter Silos), damit gemeinsame Features wiederverwendbar sind.
 - [ ] Wettquoten als zusaetzliche Bronze-Quelle planen (spaeteres Scraping/API), inkl. Join-Keys auf Fixture-/Team-Ebene fuer Silver/Gold Features.

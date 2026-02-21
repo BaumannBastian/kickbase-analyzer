@@ -47,8 +47,12 @@ PLAYER_LINK_RE = re.compile(
     flags=re.IGNORECASE | re.DOTALL,
 )
 PLAYER_PHOTO_LINK_RE = re.compile(
-    r'<div\s+class="player_position_photo[^"]*"[^>]*>\s*'
+    r'<div\s+class="player_position_photo[^"]*"[^>]*>\s*(?:<div[^>]*>\s*)*'
     r'<a\s+href="/(?P<slug>[a-z0-9\-]+)_(?P<pid>\d+)/"[^>]*>(?P<body>.*?)</a>',
+    flags=re.IGNORECASE | re.DOTALL,
+)
+PLAYER_NAME_LINK_RE = re.compile(
+    r'<div\s+class="player_name"[^>]*>\s*<a[^>]*>(?P<name>.*?)</a>',
     flags=re.IGNORECASE | re.DOTALL,
 )
 HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -293,34 +297,161 @@ class LigaInsiderScraper:
             bench_fragment = html_text[split_idx:bench_end_idx]
 
         rows: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
 
-        def append_from_fragment(fragment: str, lineup: str) -> None:
+        for lineup, fragment in [("starter", starter_fragment), ("bench", bench_fragment)]:
+            if not fragment:
+                continue
+            fragment_rows = cls._parse_position_rows_with_competitors(fragment=fragment, lineup=lineup)
+            for row in fragment_rows:
+                slug = str(row.get("ligainsider_player_slug", "")).strip().lower()
+                if not slug:
+                    continue
+                if slug in seen:
+                    continue
+                seen.add(slug)
+                rows.append(row)
+
+        return rows
+
+    @classmethod
+    def _parse_position_rows_with_competitors(
+        cls, *, fragment: str, lineup: str
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        column_blocks = cls._extract_div_blocks(fragment, '<div class="player_position_column')
+        if not column_blocks:
+            # Fallback fuer reduzierte/abweichende Markups ohne explizite Column-Container.
+            seen_slugs: set[str] = set()
             for link in PLAYER_PHOTO_LINK_RE.finditer(fragment):
                 slug = link.group("slug").strip().lower()
+                player_id = link.group("pid").strip()
                 body = link.group("body")
                 name = cls._extract_name_from_link_body(body)
-                if not name and slug:
+                if not name:
                     name = cls._name_from_slug(slug)
-                if not slug or not name:
+                if not slug or not name or slug in seen_slugs:
                     continue
-                key = (slug, "")
-                if key in seen:
-                    continue
-                seen.add(key)
+                seen_slugs.add(slug)
                 rows.append(
                     {
                         "ligainsider_player_slug": slug,
+                        "ligainsider_player_id": player_id,
                         "player_name": name,
                         "status": "unknown",
                         "predicted_lineup": lineup,
                         "competition_risk": "unknown",
+                        "competition_player_names": [],
+                        "competition_player_count": 0,
+                    }
+                )
+            return rows
+
+        for column_block in column_blocks:
+            sub_blocks = cls._extract_div_blocks(column_block, '<div class="sub_child"')
+            player_entries: list[dict[str, str]] = []
+
+            if sub_blocks:
+                for sub_block in sub_blocks:
+                    player = cls._extract_player_from_fragment(sub_block)
+                    if player is not None:
+                        player_entries.append(player)
+            else:
+                player = cls._extract_player_from_fragment(column_block)
+                if player is not None:
+                    player_entries.append(player)
+
+            if not player_entries:
+                continue
+
+            for player in player_entries:
+                slug = player["slug"]
+                player_id = player["player_id"]
+                name = player["player_name"]
+                competitors = [
+                    other["player_name"]
+                    for other in player_entries
+                    if other["slug"] != slug and other["player_name"]
+                ]
+                rows.append(
+                    {
+                        "ligainsider_player_slug": slug,
+                        "ligainsider_player_id": player_id,
+                        "player_name": name,
+                        "status": "unknown",
+                        "predicted_lineup": lineup,
+                        "competition_risk": "unknown",
+                        "competition_player_names": competitors,
+                        "competition_player_count": len(competitors),
                     }
                 )
 
-        append_from_fragment(starter_fragment, "starter")
-        append_from_fragment(bench_fragment, "bench")
         return rows
+
+    @classmethod
+    def _extract_div_blocks(cls, fragment: str, start_prefix: str) -> list[str]:
+        blocks: list[str] = []
+        pos = 0
+        while True:
+            start_idx = fragment.find(start_prefix, pos)
+            if start_idx < 0:
+                break
+
+            end_idx = cls._find_matching_div_end(fragment, start_idx)
+            if end_idx <= start_idx:
+                break
+
+            blocks.append(fragment[start_idx:end_idx])
+            pos = end_idx
+        return blocks
+
+    @staticmethod
+    def _find_matching_div_end(text: str, start_idx: int) -> int:
+        depth = 0
+        cursor = start_idx
+        while cursor < len(text):
+            next_open = text.find("<div", cursor)
+            next_close = text.find("</div>", cursor)
+
+            if next_close < 0:
+                return len(text)
+            if next_open >= 0 and next_open < next_close:
+                depth += 1
+                cursor = next_open + 4
+                continue
+
+            depth -= 1
+            cursor = next_close + len("</div>")
+            if depth == 0:
+                return cursor
+        return len(text)
+
+    @classmethod
+    def _extract_player_from_fragment(cls, fragment: str) -> dict[str, str] | None:
+        link = PLAYER_PHOTO_LINK_RE.search(fragment)
+        if link is None:
+            return None
+
+        slug = link.group("slug").strip().lower()
+        player_id = link.group("pid").strip()
+        if not slug:
+            return None
+
+        body = link.group("body")
+        name = cls._extract_name_from_link_body(body)
+        if not name:
+            name_match = PLAYER_NAME_LINK_RE.search(fragment)
+            if name_match is not None:
+                raw_name = html.unescape(name_match.group("name"))
+                name = re.sub(r"\s+", " ", HTML_TAG_RE.sub(" ", raw_name)).strip()
+        if not name:
+            name = cls._name_from_slug(slug)
+
+        return {
+            "slug": slug,
+            "player_id": player_id,
+            "player_name": name,
+        }
 
     @staticmethod
     def _extract_name_from_link_body(body: str) -> str:
@@ -353,6 +484,7 @@ class LigaInsiderScraper:
         )
         competition_risk = cls._first_str(node, ["competition_risk", "rotation_risk", "risk"])
         slug = cls._first_str(node, ["slug", "player_slug", "playerSlug", "id", "player_id", "playerId"])
+        player_id = cls._first_str(node, ["player_id", "playerId", "id", "pid"])
 
         if not name:
             return None
@@ -361,6 +493,7 @@ class LigaInsiderScraper:
 
         return {
             "ligainsider_player_slug": slug or "",
+            "ligainsider_player_id": player_id or "",
             "player_name": name,
             "status": status or "unknown",
             "predicted_lineup": lineup or "unknown",
@@ -374,12 +507,14 @@ class LigaInsiderScraper:
         lineup = cls._normalize_lineup(attrs.get("data-predicted-lineup", "").strip()) or "unknown"
         competition_risk = attrs.get("data-competition-risk", "").strip() or "unknown"
         slug = attrs.get("data-player-slug", "").strip() or attrs.get("data-player-id", "").strip()
+        player_id = attrs.get("data-player-id", "").strip()
 
         if not name:
             return None
 
         return {
             "ligainsider_player_slug": slug,
+            "ligainsider_player_id": player_id,
             "player_name": name,
             "status": status,
             "predicted_lineup": lineup,
