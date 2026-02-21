@@ -27,7 +27,7 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -e .
 
       - name: Lint
-        run: ./scripts/lint.sh
+        run: bash ./scripts/lint.sh
 
       - name: Run tests
-        run: ./scripts/test.sh
+        run: bash ./scripts/test.sh
