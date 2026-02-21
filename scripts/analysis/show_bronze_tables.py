@@ -99,17 +99,28 @@ def _resolve_input_dir(preferred: Path, fallback: Path) -> Path:
     return fallback
 
 
-def _discover_latest_timestamp(input_dir: Path) -> str:
-    kb_files = sorted(input_dir.glob(f"{KB_FILE_PREFIX}*.ndjson"))
-    li_files = sorted(input_dir.glob(f"{LI_FILE_PREFIX}*.ndjson"))
-    if not kb_files or not li_files:
-        raise FileNotFoundError(f"Missing bronze files in {input_dir}")
+def _latest_timestamp_for_prefix(input_dir: Path, prefix: str) -> str | None:
+    files = sorted(input_dir.glob(f"{prefix}*.ndjson"))
+    if not files:
+        return None
+    return files[-1].stem.replace(prefix, "")
 
-    kb_ts = kb_files[-1].stem.replace(KB_FILE_PREFIX, "")
-    li_ts = li_files[-1].stem.replace(LI_FILE_PREFIX, "")
-    if kb_ts != li_ts:
-        return min(kb_ts, li_ts)
-    return kb_ts
+
+def _resolve_table_path(
+    input_dir: Path,
+    *,
+    prefix: str,
+    requested_timestamp: str | None,
+) -> tuple[Path | None, str | None]:
+    if requested_timestamp:
+        requested_path = input_dir / f"{prefix}{requested_timestamp}.ndjson"
+        if requested_path.exists():
+            return requested_path, requested_timestamp
+
+    latest_ts = _latest_timestamp_for_prefix(input_dir, prefix)
+    if latest_ts is None:
+        return None, None
+    return input_dir / f"{prefix}{latest_ts}.ndjson", latest_ts
 
 
 def _read_ndjson(path: Path) -> list[dict[str, Any]]:
@@ -196,19 +207,31 @@ def _try_render_with_pandas(rows: list[dict[str, Any]], columns: list[str], limi
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     input_dir = _resolve_input_dir(args.input_dir, args.fallback_input_dir)
-    timestamp = args.timestamp or _discover_latest_timestamp(input_dir)
 
-    kb_path = input_dir / f"{KB_FILE_PREFIX}{timestamp}.ndjson"
-    li_path = input_dir / f"{LI_FILE_PREFIX}{timestamp}.ndjson"
-    odds_path = input_dir / f"{ODDS_FILE_PREFIX}{timestamp}.ndjson"
-    if not kb_path.exists() or not li_path.exists():
+    kb_path, kb_timestamp = _resolve_table_path(
+        input_dir,
+        prefix=KB_FILE_PREFIX,
+        requested_timestamp=args.timestamp,
+    )
+    li_path, li_timestamp = _resolve_table_path(
+        input_dir,
+        prefix=LI_FILE_PREFIX,
+        requested_timestamp=args.timestamp,
+    )
+    odds_path, odds_timestamp = _resolve_table_path(
+        input_dir,
+        prefix=ODDS_FILE_PREFIX,
+        requested_timestamp=args.timestamp,
+    )
+
+    if kb_path is None or li_path is None:
         raise FileNotFoundError(
-            f"Expected files for timestamp {timestamp} in {input_dir}: {kb_path.name}, {li_path.name}"
+            f"Missing required Kickbase/LigaInsider bronze files in {input_dir}"
         )
 
     kb_rows = _read_ndjson(kb_path)
     li_rows = _read_ndjson(li_path)
-    odds_rows = _read_ndjson(odds_path) if odds_path.exists() else []
+    odds_rows = _read_ndjson(odds_path) if odds_path is not None else []
     kb_rows = _filter_rows_by_player(kb_rows, args.player)
     li_rows = _filter_rows_by_player(li_rows, args.player)
     odds_rows = _filter_rows_by_player(odds_rows, args.player)
@@ -225,7 +248,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if odds_render is None:
         odds_render = _render_table(odds_rows, ODDS_COLUMNS, args.limit)
 
-    print(f"Bronze timestamp: {timestamp}")
+    print("Bronze table timestamps:")
+    print(f"- Kickbase: {kb_timestamp}")
+    print(f"- LigaInsider: {li_timestamp}")
+    print(f"- Odds: {odds_timestamp or 'missing'}")
     print(f"Input directory: {input_dir}")
     if args.player:
         print(f"Player filter: {args.player}")
