@@ -36,7 +36,6 @@ KICKBASE_COMPETITION_PLAYERS_SEARCH_PATH=/v4/competitions/{competition_id}/playe
 KICKBASE_COMPETITION_PLAYERS_PAGE_SIZE=100
 KICKBASE_COMPETITION_PLAYERS_QUERY=
 KICKBASE_PLAYER_SNAPSHOT_PATH=/v4/leagues/{league_id}/market   # Fallback
-KICKBASE_MATCH_STATS_PATH=
 KICKBASE_PLAYER_DETAILS_PATH=/v4/leagues/{league_id}/players/{player_id}
 KICKBASE_PLAYER_MARKET_VALUE_HISTORY_PATH=/v4/players/{player_id}/market-value
 KICKBASE_PLAYER_PERFORMANCE_PATH=/v4/players/{player_id}/performance
@@ -64,7 +63,6 @@ Erwartung:
 - `status = success`
 - `player_rows > 0`
 - `player_source = competition_players` (wenn Competition-Endpoint verfuegbar)
-- `match_stats_rows` kann `0` sein, wenn `KICKBASE_MATCH_STATS_PATH` leer ist
 
 ## 3) LigaInsider Scrape testen
 

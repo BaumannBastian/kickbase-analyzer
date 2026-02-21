@@ -14,7 +14,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from databricks.jobs.bronze_ingest.run_bronze_ingest import DATASETS, run_bronze_ingest
+from databricks.jobs.bronze_ingest.run_bronze_ingest import REQUIRED_DATASETS, run_bronze_ingest
 from databricks.jobs.common_io import latest_timestamp_common_flat
 from local_ingestion.core.bronze_writer import run_demo_ingestion
 
@@ -23,7 +23,7 @@ lakehouse_bronze_dir = Path("data/lakehouse/bronze")
 demo_dir = Path("demo/data")
 
 try:
-    latest_timestamp_common_flat(bronze_dir, DATASETS)
+    latest_timestamp_common_flat(bronze_dir, REQUIRED_DATASETS)
 except FileNotFoundError:
     bootstrap = run_demo_ingestion(
         demo_dir,

@@ -346,3 +346,12 @@ kickbase-analyzer/
 - [ ] MW forecast model (delta_7d).
 - [ ] Opponent/team strength features.
 - [ ] Model registry + experiment tracking.
+
+### Tomorrow (2026-02-22)
+- [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.
+- [x] Bronze Viewer korrigiert: Latest-Timestamp je Tabelle statt nur gemeinsamer Timestamp.
+- [x] CI stabilisiert (`bash` Aufruf fuer Lint/Test, kein Execute-Bit-Fehler mehr).
+- [x] Bronze vereinheitlichen: altes `kickbase_match_stats` final aus lokalen Artefakten entfernt.
+- [ ] Silver v0.9 starten: `silver.player_snapshot` als sauberer Join-Layer implementieren.
+- [ ] Silver v0.9 starten: `silver.team_matchup_snapshot` mit Odds-Features und Formkurve.
+- [ ] Gold v1.0 spezifizieren: klare Feature-Gruppen fuer Startet, Punkte, Marktwert.
