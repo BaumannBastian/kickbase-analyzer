@@ -69,6 +69,21 @@ def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
         raise SystemExit(proc.returncode)
 
 
+def dataset_exists(project: str, dataset: str, *, bq_cli: str, dry_run: bool) -> bool:
+    cmd = [
+        bq_cli,
+        f"--project_id={project}",
+        "show",
+        "--format=none",
+        f"{project}:{dataset}",
+    ]
+    print(">>", " ".join(cmd))
+    if dry_run:
+        return False
+    proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return proc.returncode == 0
+
+
 def ensure_dataset(
     project: str,
     dataset: str,
@@ -77,13 +92,16 @@ def ensure_dataset(
     bq_cli: str,
     dry_run: bool,
 ) -> None:
+    if dataset_exists(project, dataset, bq_cli=bq_cli, dry_run=dry_run):
+        print(f"Dataset already exists: {project}:{dataset}")
+        return
+
     cmd = [
         bq_cli,
         f"--location={location}",
         f"--project_id={project}",
         "mk",
         "--dataset",
-        "--if_not_exists",
         f"{project}:{dataset}",
     ]
     run_cmd(cmd, dry_run=dry_run)
