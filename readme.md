@@ -256,4 +256,10 @@ Databricks Repo/Job Runner:
 
 ## Roadmap (Kurz)
 - MVP: Ingestion + Bronze/Silver/Gold + Baseline Predictions + BigQuery + Power BI v0
-- v1: Kalibrierung StartProbability, Monte-Carlo Risk, MW Forecast delta_7d, Backtesting
+- V1.0 Fokus:
+- Kickbase Data Quality: `smc`/`ismc` Mapping fixen, `average_minutes` korrigieren, `team_id` Mapping dokumentieren.
+- Marktwert-Historie robust machen: 10d Tuples + 365d High/Low aus historisierten Daten.
+- LigaInsider Konkurrenzlogik neu: Positions-Konkurrenz ueber den gruennen Pfeil/Carousel extrahieren.
+- Silver finalisieren als Joined Base (`player_day`) plus target-spezifische Feature-Views fuer Spielt, Punkte, Marktwert.
+- Wettquoten als zusaetzliche Bronze-Quelle einplanen (spaeterer Join in Silver/Gold).
+- V1.0 Modelle: Kalibrierung StartProbability, MW Forecast (`delta_7d`), Opponent/Team-Strength Features, Backtesting-Haertung.
