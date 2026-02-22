@@ -375,7 +375,10 @@ kickbase-analyzer/
 - [x] Identity-Merge gehaertet: Unique-Konflikte auf `kb_player_id` abgefangen und `etl_state`-Keys beim UID-Merge auf den Ziel-Key umgehangen.
 - [x] Inkrementeller Lasttest abgeschlossen: 5-Spieler-Load erfolgreich gegen Postgres (`market_value`, `fact_player_match`, `fact_player_event`, Team/Match-Dims).
 - [x] LigaInsider-Enrichment gehaertet: Fallback-Matching ueber exakten Namen, Nachnamen und Slug; Birthdates/LI-IDs fuer 5er-Testload nachgezogen und UID-Transition (`...00000000` -> `...YYYYMMDD`) erfolgreich validiert.
-- [ ] Danach schrittweise auf Full-Roster hochskalieren (erst 50er Batches, dann vollstaendig; Rate-Limit/Retry beibehalten).
+- [x] 50-Spieler-Batchload erfolgreich gefahren (inkl. Images, Marktwerte, Match/Events) und Laufzeit/API-Rate validiert.
+- [x] Competition-Scope-Cleanup aktiviert: `dim_team` auf Bundesliga-Teams begrenzt und nicht-Competition-Matches/Facts aus `dim_match`/`fact_player_match` entfernt.
+- [x] Backfill-Skript fuer fehlende `dim_player`-Enrichment-Felder gebaut inkl. JSONL-Issue-Report fuer manuelle Nacharbeit.
+- [ ] LigaInsider-Backfill erweitern: fehlende Spieler ohne Snapshot-Match ueber Team-Kaderseiten/Suche aufloesen (aktuell verbleiben offene Problemfaelle im Report).
 
 ### Next Steps (2026-02-23)
 - [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.
@@ -383,7 +386,7 @@ kickbase-analyzer/
 - [x] CI stabilisiert (`bash` Aufruf fuer Lint/Test, kein Execute-Bit-Fehler mehr) und Packaging-Dependencies fuer History-ETL nachgezogen.
 - [x] Bronze vereinheitlichen: altes `kickbase_match_stats` final aus lokalen Artefakten entfernt.
 - [x] History-Schema/ETL auf Teamkuerzel-UIDs umgestellt (`dim_team.team_uid`, `bridge_player_team.team_uid`, `dim_match.home/away_team_uid`).
-- [ ] 50-Spieler-Load als naechster Ingestion-Step fahren und Laufzeit/API-Rate validieren.
+- [x] 50-Spieler-Load als naechster Ingestion-Step gefahren und Laufzeit/API-Rate validiert.
 - [ ] Silver v0.9 starten: `silver.player_snapshot` als sauberer Join-Layer implementieren.
 - [ ] Silver v0.9 starten: `silver.team_matchup_snapshot` mit Odds-Features und Formkurve.
 - [ ] Gold v1.0 spezifizieren: klare Feature-Gruppen fuer Startet, Punkte, Marktwert.

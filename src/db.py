@@ -1031,6 +1031,105 @@ def purge_history_outside_window(
     return deleted
 
 
+def cleanup_competition_scope(
+    conn: PgConnection,
+    *,
+    league_key: str,
+    allowed_team_uids: Sequence[str],
+) -> dict[str, int]:
+    allowed = sorted({str(item).strip() for item in allowed_team_uids if str(item).strip()})
+    cleaned = {
+        "fact_player_event": 0,
+        "fact_player_match": 0,
+        "dim_match": 0,
+        "bridge_player_team": 0,
+        "dim_player_team_uid": 0,
+        "dim_team": 0,
+    }
+    if not allowed:
+        return cleaned
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM fact_player_event AS e
+            USING dim_match AS m
+            WHERE e.match_uid = m.match_uid
+              AND m.league_key = %s
+              AND NOT (
+                  m.home_team_uid = ANY(%s)
+                  AND m.away_team_uid = ANY(%s)
+              )
+            """,
+            (league_key, allowed, allowed),
+        )
+        cleaned["fact_player_event"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM fact_player_match AS f
+            USING dim_match AS m
+            WHERE f.match_uid = m.match_uid
+              AND m.league_key = %s
+              AND NOT (
+                  m.home_team_uid = ANY(%s)
+                  AND m.away_team_uid = ANY(%s)
+              )
+            """,
+            (league_key, allowed, allowed),
+        )
+        cleaned["fact_player_match"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM dim_match AS m
+            WHERE m.league_key = %s
+              AND NOT (
+                  m.home_team_uid = ANY(%s)
+                  AND m.away_team_uid = ANY(%s)
+              )
+            """,
+            (league_key, allowed, allowed),
+        )
+        cleaned["dim_match"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM bridge_player_team AS b
+            USING dim_season AS s
+            WHERE b.season_uid = s.season_uid
+              AND s.league_key = %s
+              AND NOT (b.team_uid = ANY(%s))
+            """,
+            (league_key, allowed),
+        )
+        cleaned["bridge_player_team"] = cur.rowcount
+
+        cur.execute(
+            """
+            UPDATE dim_player
+            SET team_uid = NULL,
+                updated_at = now()
+            WHERE team_uid IS NOT NULL
+              AND NOT (team_uid = ANY(%s))
+            """,
+            (allowed,),
+        )
+        cleaned["dim_player_team_uid"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM dim_team
+            WHERE league_key = %s
+              AND NOT (team_uid = ANY(%s))
+            """,
+            (league_key, allowed),
+        )
+        cleaned["dim_team"] = cur.rowcount
+
+    return cleaned
+
+
 def export_raw_tables_to_csv(conn: PgConnection, output_dir: Path) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1050,7 +1149,7 @@ def export_raw_tables_to_csv(conn: PgConnection, output_dir: Path) -> list[Path]
                 ligainsider_profile_url,
                 image_mime,
                 image_bytes,
-                image_local_path,
+                image_local_path
             FROM dim_player
             ORDER BY player_uid
             """,

@@ -21,6 +21,7 @@ PostgreSQL History ist aktiv:
 - `team_uid` als sprechender Text-Key (z.B. `RBL`, `BVB`)
 - Spielerbilder als `BYTEA` in `dim_player`
 - Identity-Merge fuer `player_uid`-Transitions (z.B. wenn Birthdate spaeter verfuegbar wird)
+- Competition-Scope-Cleanup aktiv: `dim_team` + Match/Facts werden auf Bundesliga (`competition_id=1`) begrenzt
 
 Private Ingestion kann jede Quelle einzeln laden:
 - `--sources kickbase`
@@ -151,6 +152,12 @@ CSV-Fallback ohne Databricks Driver:
 python -m src.etl_history --players-csv .\\in\\players.csv --max-players 5 --days-from 1 --days-to 3
 ```
 
+Backfill fehlender Player-Enrichment-Felder + Problemreport:
+
+```powershell
+python -m scripts.history.backfill_player_enrichment --env-file .env --report-dir out/reports
+```
+
 ### Wichtige Tabellen im lokalen Postgres
 
 Schema: `kickbase_raw`
@@ -174,6 +181,7 @@ Wichtige Felder:
 - `dim_player.ligainsider_name` + `dim_player.ligainsider_profile_url`
 - `dim_team.team_uid` + `dim_team.team_name` + `dim_team.kickbase_team_id` + `dim_team.ligainsider_team_url`
 - `dim_team.team_uid` ist auf stabile Teamkuerzel normalisiert (keine Legacy-`Txx` Codes mehr)
+- Scope-Guard: nur Bundesliga-Teams bleiben in `dim_team`; `dim_match`/`fact_player_match` enthalten nur Bundesliga-Matches
 - `fact_market_value_daily.mv_date`, `fact_market_value_daily.market_value`
 - `fact_player_match.match_uid` im kompakten Format `25/26-MD23-RBLBVB`
 - `fact_player_match.is_home` (`true`/`false`) und `fact_player_match.match_result` (`W`/`D`/`L`)

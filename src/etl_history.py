@@ -1008,6 +1008,24 @@ def build_match_lookup(payload: dict[str, Any] | list[Any]) -> dict[tuple[int, i
     return lookup
 
 
+def extract_competition_team_ids(payload: dict[str, Any] | list[Any]) -> set[int]:
+    team_ids: set[int] = set()
+    for row in extract_rows(payload):
+        matches = row.get("it") if isinstance(row, dict) else None
+        if not isinstance(matches, list):
+            continue
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            t1 = _to_int(match.get("t1"))
+            t2 = _to_int(match.get("t2"))
+            if t1 is not None:
+                team_ids.add(t1)
+            if t2 is not None:
+                team_ids.add(t2)
+    return team_ids
+
+
 def build_team_symbol_lookup(payload: dict[str, Any] | list[Any]) -> dict[int, str]:
     team_code_by_team_id: dict[int, str] = dict(DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID)
     for row in extract_rows(payload):
@@ -1026,6 +1044,24 @@ def build_team_symbol_lookup(payload: dict[str, Any] | list[Any]) -> dict[int, s
             if t2 is not None and t2_symbol is not None:
                 team_code_by_team_id[t2] = t2_symbol
     return team_code_by_team_id
+
+
+def build_competition_team_uids(
+    *,
+    team_ids: set[int],
+    team_code_by_team_id: dict[int, str],
+) -> set[str]:
+    team_uids: set[str] = set()
+    for team_id in sorted(team_ids):
+        code = _resolve_team_code(
+            team_id=team_id,
+            inline_symbol=None,
+            team_code_by_team_id=team_code_by_team_id,
+        )
+        normalized = _normalize_team_code(code)
+        if normalized:
+            team_uids.add(normalized)
+    return team_uids
 
 
 def enrich_team_symbols_from_profiles(
@@ -1217,6 +1253,7 @@ def parse_performance_rows(
     active_season_label: str,
     match_lookup: dict[tuple[int, int, int], dict[str, Any]] | None = None,
     team_code_by_team_id: dict[int, str] | None = None,
+    allowed_team_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     rows = _extract_performance_entries(payload)
     out: list[dict[str, Any]] = []
@@ -1241,6 +1278,12 @@ def parse_performance_rows(
         team_id = _to_int(_first_present(row, ["team_id", "kickbase_team_id", "tid", "t", "pt"]))
         t1 = _to_int(_first_present(row, ["t1", "team_home_id"]))
         t2 = _to_int(_first_present(row, ["t2", "team_away_id"]))
+
+        if allowed_team_ids is not None:
+            if t1 is None or t2 is None:
+                continue
+            if t1 not in allowed_team_ids or t2 not in allowed_team_ids:
+                continue
 
         if (
             match_lookup is not None
@@ -1737,9 +1780,10 @@ def _collect_team_rows(
     *,
     player: PlayerMaster,
     perf_rows: list[dict[str, Any]],
-    team_code_by_team_id: dict[int, str],
     team_name_by_team_id: dict[int, str] | None = None,
     ligainsider_team_url: str | None = None,
+    allowed_team_ids: set[int] | None = None,
+    allowed_team_uids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     rows_by_key: dict[tuple[int | None, str | None], dict[str, Any]] = {}
 
@@ -1755,6 +1799,13 @@ def _collect_team_rows(
             normalized_code = DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID.get(kickbase_team_id)
         if kickbase_team_id is None and normalized_code is None:
             return
+        if allowed_team_ids is not None and kickbase_team_id is not None and kickbase_team_id not in allowed_team_ids:
+            return
+        if allowed_team_uids is not None:
+            if normalized_code is None:
+                return
+            if normalized_code not in allowed_team_uids:
+                return
         key = (kickbase_team_id, normalized_code)
         existing = rows_by_key.get(key)
         if existing is not None:
@@ -1779,12 +1830,6 @@ def _collect_team_rows(
         player.team_name,
         row_ligainsider_team_url=ligainsider_team_url,
     )
-
-    for team_id, code in team_code_by_team_id.items():
-        dynamic_name = None
-        if team_name_by_team_id is not None:
-            dynamic_name = team_name_by_team_id.get(team_id)
-        _add(team_id, code, dynamic_name or DEFAULT_TEAM_FULL_NAME_BY_CODE.get(code))
 
     for perf in perf_rows:
         is_home = perf.get("is_home")
@@ -1870,6 +1915,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from src.db import (
             DbConfig,
+            cleanup_competition_scope,
             ensure_season,
             export_player_images,
             export_raw_tables_to_csv,
@@ -1942,6 +1988,12 @@ def main(argv: list[str] | None = None) -> int:
         "purged_dim_season": 0,
         "purged_fact_market_value_daily": 0,
         "purged_dim_team": 0,
+        "scope_cleaned_fact_player_event": 0,
+        "scope_cleaned_fact_player_match": 0,
+        "scope_cleaned_dim_match": 0,
+        "scope_cleaned_bridge_player_team": 0,
+        "scope_cleaned_dim_team": 0,
+        "scope_cleaned_dim_player_team_uid": 0,
         "earliest_marketvalue_date": None,
         "latest_marketvalue_date": None,
         "csv_exports": [],
@@ -1991,10 +2043,17 @@ def main(argv: list[str] | None = None) -> int:
 
     match_lookup = build_match_lookup(matchdays_payload)
     team_code_by_team_id = build_team_symbol_lookup(matchdays_payload)
+    competition_team_ids = extract_competition_team_ids(matchdays_payload)
+    competition_team_uids = build_competition_team_uids(
+        team_ids=competition_team_ids,
+        team_code_by_team_id=team_code_by_team_id,
+    )
+    if not competition_team_ids or not competition_team_uids:
+        raise RuntimeError("Competition-Team-Set konnte aus /matchdays nicht bestimmt werden.")
     team_name_by_team_id: dict[int, str] = {
         team_id: DEFAULT_TEAM_FULL_NAME_BY_CODE.get(team_code, team_code)
         for team_id, team_code in team_code_by_team_id.items()
-        if team_code
+        if team_code and team_id in competition_team_ids
     }
 
     event_types_payload = client.get_event_types(token)
@@ -2027,6 +2086,18 @@ def main(argv: list[str] | None = None) -> int:
         summary["purged_dim_season"] += purge_stats.get("dim_season", 0)
         summary["purged_fact_market_value_daily"] += purge_stats.get("fact_market_value_daily", 0)
         summary["purged_dim_team"] += purge_stats.get("dim_team", 0)
+
+        scope_cleanup = cleanup_competition_scope(
+            conn,
+            league_key=league_key,
+            allowed_team_uids=sorted(competition_team_uids),
+        )
+        summary["scope_cleaned_fact_player_event"] += scope_cleanup.get("fact_player_event", 0)
+        summary["scope_cleaned_fact_player_match"] += scope_cleanup.get("fact_player_match", 0)
+        summary["scope_cleaned_dim_match"] += scope_cleanup.get("dim_match", 0)
+        summary["scope_cleaned_bridge_player_team"] += scope_cleanup.get("bridge_player_team", 0)
+        summary["scope_cleaned_dim_team"] += scope_cleanup.get("dim_team", 0)
+        summary["scope_cleaned_dim_player_team_uid"] += scope_cleanup.get("dim_player_team_uid", 0)
 
         set_state(conn, "last_eventtypes_sync_ts", datetime.now(UTC).isoformat().replace("+00:00", "Z"))
         conn.commit()
@@ -2199,6 +2270,7 @@ def main(argv: list[str] | None = None) -> int:
                 active_season_label=active_season_label,
                 match_lookup=match_lookup,
                 team_code_by_team_id=team_code_by_team_id,
+                allowed_team_ids=competition_team_ids,
             )
             perf_rows = [
                 row
@@ -2213,6 +2285,9 @@ def main(argv: list[str] | None = None) -> int:
                 candidate_team_ids = extract_team_ids_from_perf_rows(perf_rows)
                 if player.kickbase_team_id is not None:
                     candidate_team_ids.add(int(player.kickbase_team_id))
+                candidate_team_ids = {
+                    team_id for team_id in candidate_team_ids if team_id in competition_team_ids
+                }
 
                 enrich_team_symbols_from_profiles(
                     client=client,
@@ -2234,9 +2309,10 @@ def main(argv: list[str] | None = None) -> int:
             team_rows = _collect_team_rows(
                 player=player,
                 perf_rows=perf_rows,
-                team_code_by_team_id=team_code_by_team_id,
-            team_name_by_team_id=team_name_by_team_id,
+                team_name_by_team_id=team_name_by_team_id,
                 ligainsider_team_url=_to_text_or_none(enrichment.get("ligainsider_team_url")),
+                allowed_team_ids=competition_team_ids,
+                allowed_team_uids=competition_team_uids,
             )
             team_lookup, teams_inserted, teams_updated = upsert_dim_teams(
                 conn,
@@ -2402,6 +2478,19 @@ def main(argv: list[str] | None = None) -> int:
 
             conn.commit()
             summary["players_processed"] += 1
+
+        scope_cleanup = cleanup_competition_scope(
+            conn,
+            league_key=league_key,
+            allowed_team_uids=sorted(competition_team_uids),
+        )
+        summary["scope_cleaned_fact_player_event"] += scope_cleanup.get("fact_player_event", 0)
+        summary["scope_cleaned_fact_player_match"] += scope_cleanup.get("fact_player_match", 0)
+        summary["scope_cleaned_dim_match"] += scope_cleanup.get("dim_match", 0)
+        summary["scope_cleaned_bridge_player_team"] += scope_cleanup.get("bridge_player_team", 0)
+        summary["scope_cleaned_dim_team"] += scope_cleanup.get("dim_team", 0)
+        summary["scope_cleaned_dim_player_team_uid"] += scope_cleanup.get("dim_player_team_uid", 0)
+        conn.commit()
 
         should_export_tables = bool(args.export_tables)
         should_export_images = bool(args.export_images)

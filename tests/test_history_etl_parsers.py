@@ -125,6 +125,49 @@ class HistoryEtlParserTests(unittest.TestCase):
         self.assertNotIn("T42", by_day[9]["match_uid"])
         self.assertNotIn("T999", by_day[10]["match_uid"])
 
+    def test_parse_performance_rows_filters_non_competition_team_ids(self) -> None:
+        payload = {
+            "it": [
+                {
+                    "ti": "2025/2026",
+                    "ph": [
+                        {
+                            "day": 1,
+                            "p": 100,
+                            "md": "2025-08-22T18:30:00Z",
+                            "t1": "43",
+                            "t2": "3",
+                            "t1g": 2,
+                            "t2g": 1,
+                            "pt": "43",
+                        },
+                        {
+                            "day": 2,
+                            "p": 80,
+                            "md": "2025-08-29T18:30:00Z",
+                            "t1": "43",
+                            "t2": "58",
+                            "t1g": 1,
+                            "t2g": 0,
+                            "pt": "43",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        rows = parse_performance_rows(
+            payload,
+            player_uid=1246,
+            active_season_label="2025/2026",
+            team_code_by_team_id={43: "RBL", 3: "BVB"},
+            allowed_team_ids={43, 3},
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["matchday"], 1)
+        self.assertEqual(rows[0]["match_uid"], "25/26-MD01-RBLBVB")
+
 
 if __name__ == "__main__":
     unittest.main()
