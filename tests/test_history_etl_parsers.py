@@ -67,9 +67,10 @@ class HistoryEtlParserTests(unittest.TestCase):
         rows = parse_performance_rows(
             payload,
             player_uid="willi_orban_19921103",
-            player_id=1246,
+            kb_player_id=1246,
             competition_id=1,
             active_season_label="2025/2026",
+            team_code_by_team_id={43: "RBL", 3: "BVB", 11: "WOB"},
         )
         by_day = {row["matchday"]: row for row in rows}
 
@@ -77,6 +78,7 @@ class HistoryEtlParserTests(unittest.TestCase):
         self.assertEqual(by_day[23]["season_label"], "2025/2026")
         self.assertTrue(by_day[23]["is_home"])
         self.assertEqual(by_day[23]["match_result"], "D")
+        self.assertEqual(by_day[23]["match_uid"], "25/26-MD23-BVBRBL")
 
         self.assertFalse(by_day[22]["is_home"])
         self.assertEqual(by_day[22]["match_result"], "W")

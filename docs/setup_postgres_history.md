@@ -56,6 +56,7 @@ python -m src.etl_history --env-file .env --players-csv .\in\orban.csv --max-pla
 ```powershell
 docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "\dt"
 docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, min(mv_date), max(mv_date), count(*) FROM fact_market_value GROUP BY 1;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, kb_player_id, team_code, team_name, player_image_url FROM dim_players ORDER BY updated_at DESC LIMIT 20;"
 docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, competition_id, season_label, matchday, match_uid, points_total, is_home, match_result FROM fact_match_performance ORDER BY season_label DESC, matchday DESC LIMIT 20;"
 docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, season_label, matchday, match_uid, event_type_id, event_name, points, mt FROM fact_match_events ORDER BY season_label DESC, matchday DESC, mt ASC NULLS LAST LIMIT 25;"
 ```

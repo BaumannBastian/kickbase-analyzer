@@ -359,6 +359,11 @@ kickbase-analyzer/
 - [x] Match-Kontext in History erweitert: `fact_match_performance` mit `is_home` und `match_result` (`W`/`D`/`L`) fuer direkte Win/Draw/Loss-Analysen.
 - [x] Legacy-`season_label='unknown'` in Event-Facts wird beim ETL-Lauf pro Spieler bereinigt, wenn bereits ein gleiches Event fuer eine bekannte Saison existiert.
 - [x] Source-unabhaengige Player-ID eingefuehrt: `player_uid` (`name_yyyymmdd`) ist in allen spielerbezogenen Fact-Tabellen erste Spalte/Key.
+- [x] Kickbase-Source-ID explizit umbenannt: `player_id` -> `kb_player_id` in `dim_players` und allen spielerbezogenen Fact-Tabellen.
+- [x] Match-ID auf kompaktes, lesbares Format umgestellt: `match_uid = <yy/yy>-MD<spieltag>-<teamcode_pair>` (z.B. `25/26-MD23-BVBRBL`).
+- [x] `fact_match_performance` verschlankt: `match_ts` und `opponent_name` entfernt (ableitbar ueber `match_uid`, Teamcodes und Match-Kontext).
+- [x] Team-Normalisierung in `dim_players`: `team_code` eingefuehrt und `team_name` auf Anzeigeformat `RBL (RB Leipzig)` standardisiert.
+- [x] Spielerbild-Feld in `dim_players` ergaenzt: `player_image_url` wird aus LigaInsider-Profilseiten erfasst.
 - [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
 - [ ] Danach schrittweise auf Full-Roster hochskalieren (Rate-Limit/Retry beibehalten).
 

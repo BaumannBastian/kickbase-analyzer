@@ -46,10 +46,11 @@ class DbConfig:
 @dataclass(frozen=True)
 class ExistingPlayerIdentity:
     player_uid: str
-    player_id: int
+    kb_player_id: int
     birth_date: date | None
     ligainsider_player_slug: str | None
     ligainsider_player_id: int | None
+    player_image_url: str | None
 
 
 def get_connection(config: DbConfig) -> PgConnection:
@@ -63,23 +64,24 @@ def get_connection(config: DbConfig) -> PgConnection:
     )
 
 
-def get_existing_player_identity_by_player_id(
+def get_existing_player_identity_by_kb_player_id(
     conn: PgConnection,
-    player_id: int,
+    kb_player_id: int,
 ) -> ExistingPlayerIdentity | None:
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT
                 player_uid,
-                player_id,
+                kb_player_id,
                 birth_date,
                 ligainsider_player_slug,
-                ligainsider_player_id
+                ligainsider_player_id,
+                player_image_url
             FROM dim_players
-            WHERE player_id = %s
+            WHERE kb_player_id = %s
             """,
-            (player_id,),
+            (kb_player_id,),
         )
         row = cur.fetchone()
 
@@ -88,10 +90,11 @@ def get_existing_player_identity_by_player_id(
 
     return ExistingPlayerIdentity(
         player_uid=str(row[0]),
-        player_id=int(row[1]),
+        kb_player_id=int(row[1]),
         birth_date=row[2],
         ligainsider_player_slug=_to_text_or_none(row[3]),
         ligainsider_player_id=_to_int_or_none(row[4]),
+        player_image_url=_to_text_or_none(row[5]),
     )
 
 
@@ -102,13 +105,15 @@ def upsert_players(conn: PgConnection, players: Sequence[dict[str, Any]]) -> tup
     values = [
         (
             str(player["player_uid"]),
-            int(player["player_id"]),
-            str(player.get("name") or "").strip() or f"player_{player['player_id']}",
+            int(player["kb_player_id"]),
+            str(player.get("name") or "").strip() or f"player_{player['kb_player_id']}",
             player.get("birth_date"),
             _to_text_or_none(player.get("ligainsider_player_slug")),
             _to_int_or_none(player.get("ligainsider_player_id")),
             _to_int_or_none(player.get("team_id")),
+            _to_text_or_none(player.get("team_code")),
             _to_text_or_none(player.get("team_name")),
+            _to_text_or_none(player.get("player_image_url")),
             _to_text_or_none(player.get("position")),
             _to_int_or_none(player.get("competition_id")),
         )
@@ -118,18 +123,20 @@ def upsert_players(conn: PgConnection, players: Sequence[dict[str, Any]]) -> tup
     sql = """
         INSERT INTO dim_players (
             player_uid,
-            player_id,
+            kb_player_id,
             name,
             birth_date,
             ligainsider_player_slug,
             ligainsider_player_id,
             team_id,
+            team_code,
             team_name,
+            player_image_url,
             position,
             competition_id
         )
         VALUES %s
-        ON CONFLICT (player_id)
+        ON CONFLICT (kb_player_id)
         DO UPDATE SET
             player_uid = EXCLUDED.player_uid,
             name = EXCLUDED.name,
@@ -137,7 +144,9 @@ def upsert_players(conn: PgConnection, players: Sequence[dict[str, Any]]) -> tup
             ligainsider_player_slug = COALESCE(EXCLUDED.ligainsider_player_slug, dim_players.ligainsider_player_slug),
             ligainsider_player_id = COALESCE(EXCLUDED.ligainsider_player_id, dim_players.ligainsider_player_id),
             team_id = COALESCE(EXCLUDED.team_id, dim_players.team_id),
+            team_code = COALESCE(EXCLUDED.team_code, dim_players.team_code),
             team_name = COALESCE(EXCLUDED.team_name, dim_players.team_name),
+            player_image_url = COALESCE(EXCLUDED.player_image_url, dim_players.player_image_url),
             position = COALESCE(EXCLUDED.position, dim_players.position),
             competition_id = COALESCE(EXCLUDED.competition_id, dim_players.competition_id),
             updated_at = now()
@@ -202,7 +211,7 @@ def upsert_market_values(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> 
     values = [
         (
             str(row["player_uid"]),
-            int(row["player_id"]),
+            int(row["kb_player_id"]),
             row["mv_date"],
             int(row["market_value"]),
             _to_int_or_none(row.get("source_dt_days")),
@@ -212,11 +221,11 @@ def upsert_market_values(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> 
 
     sql = """
         INSERT INTO fact_market_value
-            (player_uid, player_id, mv_date, market_value, source_dt_days)
+            (player_uid, kb_player_id, mv_date, market_value, source_dt_days)
         VALUES %s
         ON CONFLICT (player_uid, mv_date)
         DO UPDATE SET
-            player_id = EXCLUDED.player_id,
+            kb_player_id = EXCLUDED.kb_player_id,
             market_value = EXCLUDED.market_value,
             source_dt_days = COALESCE(EXCLUDED.source_dt_days, fact_market_value.source_dt_days),
             ingested_at = now()
@@ -235,16 +244,14 @@ def upsert_match_performance(conn: PgConnection, rows: Sequence[dict[str, Any]])
     values = [
         (
             str(row["player_uid"]),
-            int(row["player_id"]),
+            int(row["kb_player_id"]),
             int(row["competition_id"]),
             str(row.get("season_label") or "unknown"),
             int(row["matchday"]),
             str(row["match_uid"]),
             _to_int_or_none(row.get("match_id")),
-            row.get("match_ts"),
             _to_int_or_none(row.get("team_id")),
             _to_int_or_none(row.get("opponent_team_id")),
-            _to_text_or_none(row.get("opponent_name")),
             _to_bool_or_none(row.get("is_home")),
             _to_int_or_none(row.get("score_home")),
             _to_int_or_none(row.get("score_away")),
@@ -258,16 +265,14 @@ def upsert_match_performance(conn: PgConnection, rows: Sequence[dict[str, Any]])
     sql = """
         INSERT INTO fact_match_performance (
             player_uid,
-            player_id,
+            kb_player_id,
             competition_id,
             season_label,
             matchday,
             match_uid,
             match_id,
-            match_ts,
             team_id,
             opponent_team_id,
-            opponent_name,
             is_home,
             score_home,
             score_away,
@@ -278,13 +283,11 @@ def upsert_match_performance(conn: PgConnection, rows: Sequence[dict[str, Any]])
         VALUES %s
         ON CONFLICT (player_uid, competition_id, season_label, matchday)
         DO UPDATE SET
-            player_id = EXCLUDED.player_id,
+            kb_player_id = EXCLUDED.kb_player_id,
             match_uid = EXCLUDED.match_uid,
             match_id = COALESCE(EXCLUDED.match_id, fact_match_performance.match_id),
-            match_ts = COALESCE(EXCLUDED.match_ts, fact_match_performance.match_ts),
             team_id = COALESCE(EXCLUDED.team_id, fact_match_performance.team_id),
             opponent_team_id = COALESCE(EXCLUDED.opponent_team_id, fact_match_performance.opponent_team_id),
-            opponent_name = COALESCE(EXCLUDED.opponent_name, fact_match_performance.opponent_name),
             is_home = COALESCE(EXCLUDED.is_home, fact_match_performance.is_home),
             score_home = COALESCE(EXCLUDED.score_home, fact_match_performance.score_home),
             score_away = COALESCE(EXCLUDED.score_away, fact_match_performance.score_away),
@@ -307,7 +310,7 @@ def insert_match_events(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> i
     values = [
         (
             str(row["player_uid"]),
-            int(row["player_id"]),
+            int(row["kb_player_id"]),
             int(row["competition_id"]),
             str(row.get("season_label") or "unknown"),
             int(row["matchday"]),
@@ -326,7 +329,7 @@ def insert_match_events(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> i
     sql = """
         INSERT INTO fact_match_events (
             player_uid,
-            player_id,
+            kb_player_id,
             competition_id,
             season_label,
             matchday,
