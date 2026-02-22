@@ -201,6 +201,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--player-name-like", default=None)
     parser.add_argument("--rps", type=float, default=3.0)
     parser.add_argument("--timeframe-days", type=int, default=3650)
+    parser.add_argument(
+        "--season-window",
+        type=int,
+        default=int(os.getenv("HISTORY_SEASON_WINDOW", "3")),
+        help="Anzahl Saisons im Retention-Fenster (inkl. aktueller Saison). Standard: 3",
+    )
     parser.add_argument("--days-from", type=int, default=1)
     parser.add_argument("--days-to", type=int, default=None)
     parser.add_argument("--season-label", default=None, help="Override fuer Saisonlabel, z.B. 2025/2026")
@@ -323,7 +329,12 @@ def _player_from_mapping(row: dict[str, Any]) -> PlayerMaster | None:
     kb_player_id = _to_int(
         _first_present(row, ["kb_player_id", "kickbase_player_id", "player_id", "id", "pi"])
     )
-    birthdate = _parse_date(_first_present(row, ["birthdate", "birth_date", "birthday", "dob"]))
+    birthdate = _parse_date(
+        _first_present(
+            row,
+            ["player_birthdate", "birthdate", "birth_date", "birthday", "dob"],
+        )
+    )
     raw_player_uid = _to_text_or_none(_first_present(row, ["player_uid", "uid", "internal_player_uid"]))
 
     player_name = _to_text(_first_present(row, ["player_name", "name", "n"])) or f"player_{kb_player_id or 'unknown'}"
@@ -339,7 +350,7 @@ def _player_from_mapping(row: dict[str, Any]) -> PlayerMaster | None:
         kickbase_team_id=_to_int(_first_present(row, ["kickbase_team_id", "team_id", "tid", "t"])),
         team_code=_normalize_team_code(_to_text_or_none(_first_present(row, ["team_code", "team_symbol", "team_short"]))),
         team_name=_to_text_or_none(_first_present(row, ["team_name", "team"])),
-        position=_to_text_or_none(_first_present(row, ["position", "pos"])),
+        position=_to_text_or_none(_first_present(row, ["player_position", "position", "pos"])),
         league_key=_to_text_or_none(_first_present(row, ["league_key", "league", "competition_key"])),
         competition_id=_to_int(_first_present(row, ["competition_id", "competitionid", "cpi"])),
         ligainsider_player_slug=_to_text_or_none(
@@ -481,7 +492,9 @@ def resolve_player_enrichment(
     image_url = player.image_url
     ligainsider_slug = player.ligainsider_player_slug
     ligainsider_player_id = player.ligainsider_player_id
-    ligainsider_player_name: str | None = None
+    ligainsider_name: str | None = None
+    ligainsider_profile_url: str | None = None
+    ligainsider_team_url: str | None = None
 
     if existing_identity is not None and birthdate is None:
         birthdate = existing_identity.birthdate
@@ -492,8 +505,9 @@ def resolve_player_enrichment(
             ligainsider_slug = _to_text_or_none(li_row.get("ligainsider_player_slug"))
         if ligainsider_player_id is None:
             ligainsider_player_id = _to_int(li_row.get("ligainsider_player_id"))
-        if ligainsider_player_name is None:
-            ligainsider_player_name = _to_text_or_none(_first_present(li_row, ["player_name", "name"]))
+        if ligainsider_name is None:
+            ligainsider_name = _to_text_or_none(_first_present(li_row, ["player_name", "name"]))
+        ligainsider_team_url = _to_text_or_none(li_row.get("source_url"))
         if image_url is None:
             image_url = _normalize_image_url(
                 _to_text_or_none(
@@ -536,19 +550,29 @@ def resolve_player_enrichment(
             birthdate = _parse_date(profile.get("birthdate"))
         if image_url is None:
             image_url = _normalize_image_url(_to_text_or_none(profile.get("image_url")))
-        if ligainsider_player_name is None:
-            ligainsider_player_name = _to_text_or_none(profile.get("player_name"))
+        if ligainsider_name is None:
+            ligainsider_name = _to_text_or_none(profile.get("player_name"))
         if ligainsider_slug is None:
             ligainsider_slug = _to_text_or_none(profile.get("ligainsider_player_slug"))
         if ligainsider_player_id is None:
             ligainsider_player_id = _to_int(profile.get("ligainsider_player_id"))
+        if ligainsider_profile_url is None:
+            ligainsider_profile_url = _to_text_or_none(profile.get("profile_url"))
+
+    if ligainsider_profile_url is None:
+        ligainsider_profile_url = _build_ligainsider_profile_url(
+            slug=ligainsider_slug,
+            ligainsider_player_id=ligainsider_player_id,
+        )
 
     return {
         "birthdate": birthdate,
         "image_url": image_url,
         "ligainsider_player_slug": ligainsider_slug,
         "ligainsider_player_id": ligainsider_player_id,
-        "ligainsider_player_name": ligainsider_player_name or player.player_name,
+        "ligainsider_name": ligainsider_name or player.player_name,
+        "ligainsider_profile_url": ligainsider_profile_url,
+        "ligainsider_team_url": ligainsider_team_url,
     }
 
 
@@ -643,6 +667,7 @@ def fetch_ligainsider_profile(
                 "player_name": resolved_player_name,
                 "ligainsider_player_slug": resolved_slug,
                 "ligainsider_player_id": resolved_player_id,
+                "profile_url": _to_text_or_none(response.url),
             }
 
     return {
@@ -651,6 +676,7 @@ def fetch_ligainsider_profile(
         "player_name": None,
         "ligainsider_player_slug": None,
         "ligainsider_player_id": None,
+        "profile_url": None,
     }
 
 
@@ -680,6 +706,20 @@ def _extract_ligainsider_identity(
         return (slug.lower() if slug else None, pid)
 
     return None, None
+
+
+def _build_ligainsider_profile_url(
+    *,
+    slug: str | None,
+    ligainsider_player_id: int | None,
+) -> str | None:
+    normalized_slug = _to_text_or_none(slug)
+    if not normalized_slug:
+        return None
+    base_url = os.getenv("LIGAINSIDER_BASE_URL", "https://www.ligainsider.de").rstrip("/")
+    if ligainsider_player_id is not None:
+        return f"{base_url}/{normalized_slug}_{ligainsider_player_id}/"
+    return f"{base_url}/{normalized_slug}/"
 
 
 def _extract_birth_date_from_ligainsider_html(html_text: str) -> date | None:
@@ -1459,6 +1499,29 @@ def _season_token(season_label: str) -> str:
     return f"{left}/{right}"
 
 
+def _season_uid_from_label_local(season_label: str | None) -> int | None:
+    if not season_label:
+        return None
+    match = re.match(r"^\s*(\d{4})\s*/\s*(\d{4})\s*$", season_label)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1)[-2:] + match.group(2)[-2:])
+    except ValueError:
+        return None
+
+
+def _recent_season_uids(active_season_uid: int, window: int) -> list[int]:
+    window_size = max(1, int(window))
+    return [int(active_season_uid - (offset * 101)) for offset in range(window_size)]
+
+
+def _market_value_cutoff_date_from_season_uid(season_uid: int) -> date:
+    start_yy = int(season_uid // 100)
+    start_year = 1900 + start_yy if start_yy >= 90 else 2000 + start_yy
+    return date(start_year, 7, 1)
+
+
 def _build_match_uid(
     *,
     season_label: str,
@@ -1796,6 +1859,9 @@ def main(argv: list[str] | None = None) -> int:
             get_max_market_value_date,
             insert_fact_player_events,
             merge_player_identity,
+            purge_history_outside_window,
+            set_dim_player_team_uid,
+            set_dim_team_ligainsider_url,
             set_state,
             upsert_bridge_player_team,
             upsert_dim_event_types,
@@ -1850,6 +1916,13 @@ def main(argv: list[str] | None = None) -> int:
         "images_unchanged": 0,
         "images_missing": 0,
         "images_failed": 0,
+        "purged_fact_player_event": 0,
+        "purged_fact_player_match": 0,
+        "purged_dim_match": 0,
+        "purged_bridge_player_team": 0,
+        "purged_dim_season": 0,
+        "purged_fact_market_value_daily": 0,
+        "purged_dim_team": 0,
         "earliest_marketvalue_date": None,
         "latest_marketvalue_date": None,
         "csv_exports": [],
@@ -1919,6 +1992,23 @@ def main(argv: list[str] | None = None) -> int:
         summary["event_types_updated"] += updated_types
 
         active_season_uid = ensure_season(conn, league_key=league_key, season_label=active_season_label)
+        retained_season_uids = _recent_season_uids(active_season_uid, args.season_window)
+        min_retained_season_uid = min(retained_season_uids)
+        market_value_cutoff_date = _market_value_cutoff_date_from_season_uid(min_retained_season_uid)
+
+        purge_stats = purge_history_outside_window(
+            conn,
+            min_season_uid=min_retained_season_uid,
+            min_market_value_date=market_value_cutoff_date,
+        )
+        summary["purged_fact_player_event"] += purge_stats.get("fact_player_event", 0)
+        summary["purged_fact_player_match"] += purge_stats.get("fact_player_match", 0)
+        summary["purged_dim_match"] += purge_stats.get("dim_match", 0)
+        summary["purged_bridge_player_team"] += purge_stats.get("bridge_player_team", 0)
+        summary["purged_dim_season"] += purge_stats.get("dim_season", 0)
+        summary["purged_fact_market_value_daily"] += purge_stats.get("fact_market_value_daily", 0)
+        summary["purged_dim_team"] += purge_stats.get("dim_team", 0)
+
         set_state(conn, "last_eventtypes_sync_ts", datetime.now(UTC).isoformat().replace("+00:00", "Z"))
         conn.commit()
 
@@ -2030,9 +2120,10 @@ def main(argv: list[str] | None = None) -> int:
                         "player_name": player.player_name,
                         "ligainsider_player_id": enrichment.get("ligainsider_player_id"),
                         "ligainsider_player_slug": enrichment.get("ligainsider_player_slug"),
-                        "ligainsider_player_name": enrichment.get("ligainsider_player_name"),
-                        "position": player.position,
-                        "birthdate": enrichment.get("birthdate"),
+                        "ligainsider_name": enrichment.get("ligainsider_name"),
+                        "ligainsider_profile_url": enrichment.get("ligainsider_profile_url"),
+                        "player_position": player.position,
+                        "player_birthdate": enrichment.get("birthdate"),
                         "image_blob": image_result.image_blob,
                         "image_mime": image_result.image_mime,
                         "image_sha256": image_result.image_sha256,
@@ -2054,6 +2145,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             market_rows = parse_market_value_history(market_payload, player_uid=resolved_player_uid)
+            market_rows = [row for row in market_rows if row["mv_date"] >= market_value_cutoff_date]
             max_existing_date = get_max_market_value_date(conn, resolved_player_uid)
             if max_existing_date is not None:
                 market_rows = [row for row in market_rows if row["mv_date"] > max_existing_date]
@@ -2089,6 +2181,14 @@ def main(argv: list[str] | None = None) -> int:
                 match_lookup=match_lookup,
                 team_code_by_team_id=team_code_by_team_id,
             )
+            perf_rows = [
+                row
+                for row in perf_rows
+                if (
+                    _season_uid_from_label_local(_to_text_or_none(row.get("season_label")))
+                    in retained_season_uids
+                )
+            ]
 
             if perf_rows:
                 candidate_team_ids = extract_team_ids_from_perf_rows(perf_rows)
@@ -2132,6 +2232,16 @@ def main(argv: list[str] | None = None) -> int:
                 team_lookup=team_lookup,
             )
             if player_team_uid is not None:
+                set_dim_player_team_uid(
+                    conn,
+                    player_uid=resolved_player_uid,
+                    team_uid=player_team_uid,
+                )
+                set_dim_team_ligainsider_url(
+                    conn,
+                    team_uid=player_team_uid,
+                    ligainsider_team_url=_to_text_or_none(enrichment.get("ligainsider_team_url")),
+                )
                 bridge_inserted, bridge_updated = upsert_bridge_player_team(
                     conn,
                     [

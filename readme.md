@@ -166,15 +166,19 @@ Schema: `kickbase_raw`
 
 Wichtige Felder:
 - `dim_player.player_uid` (interner stabiler Schluessel)
+- `dim_player.player_name`, `dim_player.player_birthdate`, `dim_player.player_position`
+- `dim_player.team_uid` als aktuelles Team-Mapping am Spielerstammsatz
 - `dim_player.kb_player_id` als explizite Kickbase-Referenz-ID
-- `dim_player.image_blob` (`BYTEA`) + `image_mime` + `image_sha256` fuer Spielerbilder
+- `dim_player.image_blob` (`BYTEA`) + `image_mime` + `image_sha256` + `image_bytes` fuer Spielerbilder
 - `dim_player.image_local_path` fuer den lokalen Datei-Link (`data/history/player_images/<player_uid>.jpg`)
-- `dim_team.team_code` + `dim_team.team_name` im Format `RBL (RB Leipzig)`
+- `dim_player.ligainsider_name` + `dim_player.ligainsider_profile_url`
+- `dim_team.team_uid` + `dim_team.team_name` + `dim_team.kickbase_team_id` + `dim_team.ligainsider_team_url`
 - `dim_team.team_uid` ist auf stabile Teamkuerzel normalisiert (keine Legacy-`Txx` Codes mehr)
 - `fact_market_value_daily.mv_date`, `fact_market_value_daily.market_value`
 - `fact_player_match.match_uid` im kompakten Format `25/26-MD23-RBLBVB`
 - `fact_player_match.is_home` (`true`/`false`) und `fact_player_match.match_result` (`W`/`D`/`L`)
 - `fact_player_event.event_type_id` + Join auf `dim_event_type.event_name` fuer lesbare Eventnamen
+- Retention: `dim_match`, `fact_player_match`, `fact_player_event` und `fact_market_value_daily` werden auf akt. Saison + 2 vorherige begrenzt.
 
 ## Databricks / BigQuery / Power BI
 

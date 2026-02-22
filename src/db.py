@@ -93,7 +93,7 @@ def get_existing_player_identity(
                 SELECT
                     player_uid,
                     kb_player_id,
-                    birthdate,
+                    player_birthdate AS birthdate,
                     image_sha256,
                     image_mime,
                     image_local_path,
@@ -111,7 +111,7 @@ def get_existing_player_identity(
                 SELECT
                     player_uid,
                     kb_player_id,
-                    birthdate,
+                    player_birthdate AS birthdate,
                     image_sha256,
                     image_mime,
                     image_local_path,
@@ -308,11 +308,13 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             str(row["player_uid"]),
             _to_int_or_none(row.get("kb_player_id")),
             str(row.get("player_name") or f"player_{row['player_uid']}").strip(),
+            _to_text_or_none(row.get("team_uid")),
             _to_int_or_none(row.get("ligainsider_player_id")),
             _to_text_or_none(row.get("ligainsider_player_slug")),
-            _to_text_or_none(row.get("ligainsider_player_name")),
-            _to_text_or_none(row.get("position")),
-            row.get("birthdate"),
+            _to_text_or_none(row.get("ligainsider_name") or row.get("ligainsider_player_name")),
+            _to_text_or_none(row.get("ligainsider_profile_url")),
+            _to_text_or_none(row.get("player_position") or row.get("position")),
+            row.get("player_birthdate") or row.get("birthdate"),
             row.get("image_blob"),
             _to_text_or_none(row.get("image_mime")),
             _to_text_or_none(row.get("image_sha256")),
@@ -331,11 +333,13 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             player_uid,
             kb_player_id,
             player_name,
+            team_uid,
             ligainsider_player_id,
             ligainsider_player_slug,
-            ligainsider_player_name,
-            position,
-            birthdate,
+            ligainsider_name,
+            ligainsider_profile_url,
+            player_position,
+            player_birthdate,
             image_blob,
             image_mime,
             image_sha256,
@@ -346,11 +350,13 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
         DO UPDATE SET
             player_uid = EXCLUDED.player_uid,
             player_name = EXCLUDED.player_name,
+            team_uid = COALESCE(EXCLUDED.team_uid, dim_player.team_uid),
             ligainsider_player_id = COALESCE(EXCLUDED.ligainsider_player_id, dim_player.ligainsider_player_id),
             ligainsider_player_slug = COALESCE(EXCLUDED.ligainsider_player_slug, dim_player.ligainsider_player_slug),
-            ligainsider_player_name = COALESCE(EXCLUDED.ligainsider_player_name, dim_player.ligainsider_player_name),
-            position = COALESCE(EXCLUDED.position, dim_player.position),
-            birthdate = COALESCE(EXCLUDED.birthdate, dim_player.birthdate),
+            ligainsider_name = COALESCE(EXCLUDED.ligainsider_name, dim_player.ligainsider_name),
+            ligainsider_profile_url = COALESCE(EXCLUDED.ligainsider_profile_url, dim_player.ligainsider_profile_url),
+            player_position = COALESCE(EXCLUDED.player_position, dim_player.player_position),
+            player_birthdate = COALESCE(EXCLUDED.player_birthdate, dim_player.player_birthdate),
             image_blob = CASE
                 WHEN EXCLUDED.image_sha256 IS NOT NULL
                      AND EXCLUDED.image_sha256 IS DISTINCT FROM dim_player.image_sha256
@@ -374,11 +380,13 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             player_uid,
             kb_player_id,
             player_name,
+            team_uid,
             ligainsider_player_id,
             ligainsider_player_slug,
-            ligainsider_player_name,
-            position,
-            birthdate,
+            ligainsider_name,
+            ligainsider_profile_url,
+            player_position,
+            player_birthdate,
             image_blob,
             image_mime,
             image_sha256,
@@ -388,11 +396,13 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
         ON CONFLICT (player_uid)
         DO UPDATE SET
             player_name = EXCLUDED.player_name,
+            team_uid = COALESCE(EXCLUDED.team_uid, dim_player.team_uid),
             ligainsider_player_id = COALESCE(EXCLUDED.ligainsider_player_id, dim_player.ligainsider_player_id),
             ligainsider_player_slug = COALESCE(EXCLUDED.ligainsider_player_slug, dim_player.ligainsider_player_slug),
-            ligainsider_player_name = COALESCE(EXCLUDED.ligainsider_player_name, dim_player.ligainsider_player_name),
-            position = COALESCE(EXCLUDED.position, dim_player.position),
-            birthdate = COALESCE(EXCLUDED.birthdate, dim_player.birthdate),
+            ligainsider_name = COALESCE(EXCLUDED.ligainsider_name, dim_player.ligainsider_name),
+            ligainsider_profile_url = COALESCE(EXCLUDED.ligainsider_profile_url, dim_player.ligainsider_profile_url),
+            player_position = COALESCE(EXCLUDED.player_position, dim_player.player_position),
+            player_birthdate = COALESCE(EXCLUDED.player_birthdate, dim_player.player_birthdate),
             image_blob = CASE
                 WHEN EXCLUDED.image_sha256 IS NOT NULL
                      AND EXCLUDED.image_sha256 IS DISTINCT FROM dim_player.image_sha256
@@ -425,6 +435,21 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             updated_total += updated
 
     return inserted_total, updated_total
+
+
+def set_dim_player_team_uid(conn: PgConnection, *, player_uid: str, team_uid: str | None) -> None:
+    if not team_uid:
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE dim_player
+            SET team_uid = %s,
+                updated_at = now()
+            WHERE player_uid = %s
+            """,
+            (str(team_uid), str(player_uid)),
+        )
 
 
 def upsert_dim_event_types(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tuple[int, int]:
@@ -502,6 +527,7 @@ def upsert_dim_teams(
             "team_code": team_code,
             "team_uid": _build_team_uid(team_code=team_code, kickbase_team_id=kickbase_team_id),
             "team_name": team_name,
+            "ligainsider_team_url": _to_text_or_none(row.get("ligainsider_team_url")),
         }
 
     with conn.cursor() as cur:
@@ -510,35 +536,38 @@ def upsert_dim_teams(
             team_code = row["team_code"]
             team_uid = row["team_uid"]
             team_name = row["team_name"]
+            ligainsider_team_url = row["ligainsider_team_url"]
 
             if team_code is not None:
                 cur.execute(
                     """
-                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (league_key, team_code)
                     DO UPDATE SET
                         team_uid = EXCLUDED.team_uid,
                         kickbase_team_id = COALESCE(EXCLUDED.kickbase_team_id, dim_team.kickbase_team_id),
                         team_name = COALESCE(EXCLUDED.team_name, dim_team.team_name),
+                        ligainsider_team_url = COALESCE(EXCLUDED.ligainsider_team_url, dim_team.ligainsider_team_url),
                         updated_at = now()
                     RETURNING team_uid, (xmax = 0) AS inserted
                     """,
-                    (team_uid, league_key, kickbase_team_id, team_code, team_name),
+                    (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url),
                 )
             else:
                 cur.execute(
                     """
-                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (league_key, kickbase_team_id)
                     DO UPDATE SET
                         team_uid = EXCLUDED.team_uid,
                         team_name = COALESCE(EXCLUDED.team_name, dim_team.team_name),
+                        ligainsider_team_url = COALESCE(EXCLUDED.ligainsider_team_url, dim_team.ligainsider_team_url),
                         updated_at = now()
                     RETURNING team_uid, (xmax = 0) AS inserted
                     """,
-                    (team_uid, league_key, kickbase_team_id, team_code, team_name),
+                    (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url),
                 )
 
             team_uid, inserted_flag = cur.fetchone()
@@ -579,6 +608,26 @@ def upsert_dim_teams(
                     by_team_code[str(team_code).upper()] = str(team_uid)
 
     return TeamLookup(by_kickbase_team_id, by_team_code), inserted_total, updated_total
+
+
+def set_dim_team_ligainsider_url(
+    conn: PgConnection,
+    *,
+    team_uid: str | None,
+    ligainsider_team_url: str | None,
+) -> None:
+    if not team_uid or not ligainsider_team_url:
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE dim_team
+            SET ligainsider_team_url = COALESCE(ligainsider_team_url, %s),
+                updated_at = now()
+            WHERE team_uid = %s
+            """,
+            (ligainsider_team_url, str(team_uid)),
+        )
 
 
 def upsert_bridge_player_team(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tuple[int, int]:
@@ -828,6 +877,92 @@ def set_state(conn: PgConnection, key: str, value: str) -> None:
         )
 
 
+def purge_history_outside_window(
+    conn: PgConnection,
+    *,
+    min_season_uid: int,
+    min_market_value_date: date,
+) -> dict[str, int]:
+    deleted: dict[str, int] = {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM fact_player_event AS e
+            USING dim_match AS m
+            WHERE e.match_uid = m.match_uid
+              AND (m.season_uid IS NULL OR m.season_uid < %s)
+            """,
+            (int(min_season_uid),),
+        )
+        deleted["fact_player_event"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM fact_player_match AS f
+            USING dim_match AS m
+            WHERE f.match_uid = m.match_uid
+              AND (m.season_uid IS NULL OR m.season_uid < %s)
+            """,
+            (int(min_season_uid),),
+        )
+        deleted["fact_player_match"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM dim_match
+            WHERE season_uid IS NULL OR season_uid < %s
+            """,
+            (int(min_season_uid),),
+        )
+        deleted["dim_match"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM bridge_player_team
+            WHERE season_uid < %s
+            """,
+            (int(min_season_uid),),
+        )
+        deleted["bridge_player_team"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM dim_season
+            WHERE season_uid < %s
+            """,
+            (int(min_season_uid),),
+        )
+        deleted["dim_season"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM fact_market_value_daily
+            WHERE mv_date < %s
+            """,
+            (min_market_value_date,),
+        )
+        deleted["fact_market_value_daily"] = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM dim_team AS t
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM dim_match AS m
+                WHERE m.home_team_uid = t.team_uid
+                   OR m.away_team_uid = t.team_uid
+            )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM bridge_player_team AS b
+                WHERE b.team_uid = t.team_uid
+            )
+            """
+        )
+        deleted["dim_team"] = cur.rowcount
+    return deleted
+
+
 def export_raw_tables_to_csv(conn: PgConnection, output_dir: Path) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -837,24 +972,34 @@ def export_raw_tables_to_csv(conn: PgConnection, output_dir: Path) -> list[Path]
             """
             SELECT
                 player_uid,
-                kb_player_id,
                 player_name,
+                player_birthdate,
+                team_uid,
+                player_position,
+                kb_player_id,
                 ligainsider_player_id,
-                ligainsider_player_slug,
-                ligainsider_player_name,
-                position,
-                birthdate,
+                ligainsider_name,
+                ligainsider_profile_url,
                 image_mime,
-                image_sha256,
+                image_bytes,
                 image_local_path,
-                created_at,
-                updated_at
             FROM dim_player
             ORDER BY player_uid
             """,
         ),
         ("dim_season", "SELECT * FROM dim_season ORDER BY season_uid"),
-        ("dim_team", "SELECT * FROM dim_team ORDER BY team_uid"),
+        (
+            "dim_team",
+            """
+            SELECT
+                team_uid,
+                team_name,
+                kickbase_team_id,
+                ligainsider_team_url
+            FROM dim_team
+            ORDER BY team_uid
+            """,
+        ),
         (
             "bridge_player_team",
             "SELECT * FROM bridge_player_team ORDER BY season_uid, team_uid, player_uid",

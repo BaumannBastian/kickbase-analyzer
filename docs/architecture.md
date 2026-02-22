@@ -369,6 +369,8 @@ kickbase-analyzer/
 - [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
 - [x] Team-Schluessel vereinheitlicht: `team_uid` als sprechender Text-Key (primär Teamkuerzel wie `RBL`, `BVB`) statt numerischer Surrogate-Key.
 - [x] Legacy-Teamcodes bereinigt: historische `Txx`-UIDs in `dim_team`/`dim_match`/Facts auf stabile Teamkuerzel migriert; `dim_match.match_uid` fuer Bestandsdaten neu aufgebaut.
+- [x] Retention fuer History-RAW umgesetzt: nur aktuelle Saison + zwei vorherige Saisons in `dim_match`, `fact_player_match`, `fact_player_event`; Marktwerte analog auf denselben Zeitraum begrenzt.
+- [x] Dim-Spalten geschärft: `dim_player` mit `player_birthdate`/`player_position`/`team_uid`/`ligainsider_profile_url`/`image_bytes`; `dim_team` mit `ligainsider_team_url`.
 - [x] Identity-Merge eingefuehrt: wenn sich `player_uid` verbessert (z.B. von `...00000000` auf `...YYYYMMDD`), werden bestehende Facts/Bridges konsistent auf den Ziel-Key uebernommen.
 - [x] Identity-Merge gehaertet: Unique-Konflikte auf `kb_player_id` abgefangen und `etl_state`-Keys beim UID-Merge auf den Ziel-Key umgehangen.
 - [x] Inkrementeller Lasttest abgeschlossen: 5-Spieler-Load erfolgreich gegen Postgres (`market_value`, `fact_player_match`, `fact_player_event`, Team/Match-Dims).
