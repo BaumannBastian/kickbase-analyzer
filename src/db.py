@@ -2,7 +2,7 @@
 # db.py
 #
 # PostgreSQL-Zugriffsschicht fuer Kickbase-History-ETL.
-# Enthalten sind Verbindungsaufbau, Upserts und Aggregationen.
+# Enthalten sind Verbindungsaufbau, Upserts und State-Handling.
 #
 # Usage
 # ------------------------------------
@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import os
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 import psycopg2
 from psycopg2.extensions import connection as PgConnection
@@ -43,6 +43,15 @@ class DbConfig:
         )
 
 
+@dataclass(frozen=True)
+class ExistingPlayerIdentity:
+    player_uid: str
+    player_id: int
+    birth_date: date | None
+    ligainsider_player_slug: str | None
+    ligainsider_player_id: int | None
+
+
 def get_connection(config: DbConfig) -> PgConnection:
     return psycopg2.connect(
         host=config.host,
@@ -54,14 +63,50 @@ def get_connection(config: DbConfig) -> PgConnection:
     )
 
 
+def get_existing_player_identity_by_player_id(
+    conn: PgConnection,
+    player_id: int,
+) -> ExistingPlayerIdentity | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                player_uid,
+                player_id,
+                birth_date,
+                ligainsider_player_slug,
+                ligainsider_player_id
+            FROM dim_players
+            WHERE player_id = %s
+            """,
+            (player_id,),
+        )
+        row = cur.fetchone()
+
+    if row is None:
+        return None
+
+    return ExistingPlayerIdentity(
+        player_uid=str(row[0]),
+        player_id=int(row[1]),
+        birth_date=row[2],
+        ligainsider_player_slug=_to_text_or_none(row[3]),
+        ligainsider_player_id=_to_int_or_none(row[4]),
+    )
+
+
 def upsert_players(conn: PgConnection, players: Sequence[dict[str, Any]]) -> tuple[int, int]:
     if not players:
         return 0, 0
 
     values = [
         (
+            str(player["player_uid"]),
             int(player["player_id"]),
             str(player.get("name") or "").strip() or f"player_{player['player_id']}",
+            player.get("birth_date"),
+            _to_text_or_none(player.get("ligainsider_player_slug")),
+            _to_int_or_none(player.get("ligainsider_player_id")),
             _to_int_or_none(player.get("team_id")),
             _to_text_or_none(player.get("team_name")),
             _to_text_or_none(player.get("position")),
@@ -71,12 +116,26 @@ def upsert_players(conn: PgConnection, players: Sequence[dict[str, Any]]) -> tup
     ]
 
     sql = """
-        INSERT INTO dim_players
-            (player_id, name, team_id, team_name, position, competition_id)
+        INSERT INTO dim_players (
+            player_uid,
+            player_id,
+            name,
+            birth_date,
+            ligainsider_player_slug,
+            ligainsider_player_id,
+            team_id,
+            team_name,
+            position,
+            competition_id
+        )
         VALUES %s
         ON CONFLICT (player_id)
         DO UPDATE SET
+            player_uid = EXCLUDED.player_uid,
             name = EXCLUDED.name,
+            birth_date = COALESCE(EXCLUDED.birth_date, dim_players.birth_date),
+            ligainsider_player_slug = COALESCE(EXCLUDED.ligainsider_player_slug, dim_players.ligainsider_player_slug),
+            ligainsider_player_id = COALESCE(EXCLUDED.ligainsider_player_id, dim_players.ligainsider_player_id),
             team_id = COALESCE(EXCLUDED.team_id, dim_players.team_id),
             team_name = COALESCE(EXCLUDED.team_name, dim_players.team_name),
             position = COALESCE(EXCLUDED.position, dim_players.position),
@@ -120,15 +179,15 @@ def upsert_event_types(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
     return _count_inserted_updated(result)
 
 
-def get_max_market_value_date(conn: PgConnection, player_id: int) -> date | None:
+def get_max_market_value_date(conn: PgConnection, player_uid: str) -> date | None:
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT max(mv_date)
             FROM fact_market_value
-            WHERE player_id = %s
+            WHERE player_uid = %s
             """,
-            (player_id,),
+            (player_uid,),
         )
         row = cur.fetchone()
     if row is None:
@@ -142,6 +201,7 @@ def upsert_market_values(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> 
 
     values = [
         (
+            str(row["player_uid"]),
             int(row["player_id"]),
             row["mv_date"],
             int(row["market_value"]),
@@ -152,10 +212,11 @@ def upsert_market_values(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> 
 
     sql = """
         INSERT INTO fact_market_value
-            (player_id, mv_date, market_value, source_dt_days)
+            (player_uid, player_id, mv_date, market_value, source_dt_days)
         VALUES %s
-        ON CONFLICT (player_id, mv_date)
+        ON CONFLICT (player_uid, mv_date)
         DO UPDATE SET
+            player_id = EXCLUDED.player_id,
             market_value = EXCLUDED.market_value,
             source_dt_days = COALESCE(EXCLUDED.source_dt_days, fact_market_value.source_dt_days),
             ingested_at = now()
@@ -173,10 +234,12 @@ def upsert_match_performance(conn: PgConnection, rows: Sequence[dict[str, Any]])
 
     values = [
         (
+            str(row["player_uid"]),
             int(row["player_id"]),
             int(row["competition_id"]),
             str(row.get("season_label") or "unknown"),
             int(row["matchday"]),
+            str(row["match_uid"]),
             _to_int_or_none(row.get("match_id")),
             row.get("match_ts"),
             _to_int_or_none(row.get("team_id")),
@@ -194,10 +257,12 @@ def upsert_match_performance(conn: PgConnection, rows: Sequence[dict[str, Any]])
 
     sql = """
         INSERT INTO fact_match_performance (
+            player_uid,
             player_id,
             competition_id,
             season_label,
             matchday,
+            match_uid,
             match_id,
             match_ts,
             team_id,
@@ -211,8 +276,10 @@ def upsert_match_performance(conn: PgConnection, rows: Sequence[dict[str, Any]])
             raw_json
         )
         VALUES %s
-        ON CONFLICT (player_id, competition_id, season_label, matchday)
+        ON CONFLICT (player_uid, competition_id, season_label, matchday)
         DO UPDATE SET
+            player_id = EXCLUDED.player_id,
+            match_uid = EXCLUDED.match_uid,
             match_id = COALESCE(EXCLUDED.match_id, fact_match_performance.match_id),
             match_ts = COALESCE(EXCLUDED.match_ts, fact_match_performance.match_ts),
             team_id = COALESCE(EXCLUDED.team_id, fact_match_performance.team_id),
@@ -239,11 +306,14 @@ def insert_match_events(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> i
 
     values = [
         (
+            str(row["player_uid"]),
             int(row["player_id"]),
             int(row["competition_id"]),
             str(row.get("season_label") or "unknown"),
             int(row["matchday"]),
+            _to_text_or_none(row.get("match_uid")),
             int(row["event_type_id"]),
+            _to_text_or_none(row.get("event_name")),
             int(row["points"]),
             _to_int_or_none(row.get("mt")),
             _to_text_or_none(row.get("att")),
@@ -255,11 +325,14 @@ def insert_match_events(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> i
 
     sql = """
         INSERT INTO fact_match_events (
+            player_uid,
             player_id,
             competition_id,
             season_label,
             matchday,
+            match_uid,
             event_type_id,
+            event_name,
             points,
             mt,
             att,
@@ -276,75 +349,22 @@ def insert_match_events(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> i
     return len(inserted_rows)
 
 
-def refresh_match_event_agg(
-    conn: PgConnection,
-    *,
-    player_id: int,
-    competition_id: int,
-    season_label: str,
-    matchdays: Iterable[int],
-) -> int:
-    days = sorted({int(day) for day in matchdays})
-    if not days:
-        return 0
-
-    sql = """
-        INSERT INTO fact_match_event_agg (
-            player_id,
-            competition_id,
-            season_label,
-            matchday,
-            event_type_id,
-            points_sum,
-            event_count,
-            ingested_at
-        )
-        SELECT
-            e.player_id,
-            e.competition_id,
-            e.season_label,
-            e.matchday,
-            e.event_type_id,
-            SUM(e.points) AS points_sum,
-            COUNT(*) AS event_count,
-            now()
-        FROM fact_match_events e
-        WHERE e.player_id = %s
-          AND e.competition_id = %s
-          AND e.season_label = %s
-          AND e.matchday = ANY(%s)
-        GROUP BY e.player_id, e.competition_id, e.season_label, e.matchday, e.event_type_id
-        ON CONFLICT (player_id, competition_id, season_label, matchday, event_type_id)
-        DO UPDATE SET
-            points_sum = EXCLUDED.points_sum,
-            event_count = EXCLUDED.event_count,
-            ingested_at = now()
-        RETURNING 1
-    """
-
-    with conn.cursor() as cur:
-        cur.execute(sql, (player_id, competition_id, season_label, days))
-        rows = cur.fetchall()
-    return len(rows)
-
-
 def cleanup_unknown_event_rows_for_player(
     conn: PgConnection,
     *,
-    player_id: int,
+    player_uid: str,
     competition_id: int,
     season_label: str,
-) -> tuple[int, int]:
+) -> int:
     deleted_events = 0
-    deleted_agg = 0
 
     delete_events_sql = """
         DELETE FROM fact_match_events unknown_rows
         USING fact_match_events known_rows
-        WHERE known_rows.player_id = %s
+        WHERE known_rows.player_uid = %s
           AND known_rows.competition_id = %s
           AND known_rows.season_label = %s
-          AND unknown_rows.player_id = known_rows.player_id
+          AND unknown_rows.player_uid = known_rows.player_uid
           AND unknown_rows.competition_id = known_rows.competition_id
           AND unknown_rows.matchday = known_rows.matchday
           AND unknown_rows.event_type_id = known_rows.event_type_id
@@ -354,28 +374,11 @@ def cleanup_unknown_event_rows_for_player(
           AND unknown_rows.season_label = 'unknown'
     """
 
-    delete_agg_sql = """
-        DELETE FROM fact_match_event_agg unknown_rows
-        USING fact_match_event_agg known_rows
-        WHERE known_rows.player_id = %s
-          AND known_rows.competition_id = %s
-          AND known_rows.season_label = %s
-          AND unknown_rows.player_id = known_rows.player_id
-          AND unknown_rows.competition_id = known_rows.competition_id
-          AND unknown_rows.matchday = known_rows.matchday
-          AND unknown_rows.event_type_id = known_rows.event_type_id
-          AND unknown_rows.points_sum = known_rows.points_sum
-          AND unknown_rows.event_count = known_rows.event_count
-          AND unknown_rows.season_label = 'unknown'
-    """
-
     with conn.cursor() as cur:
-        cur.execute(delete_events_sql, (player_id, competition_id, season_label))
+        cur.execute(delete_events_sql, (player_uid, competition_id, season_label))
         deleted_events = cur.rowcount
-        cur.execute(delete_agg_sql, (player_id, competition_id, season_label))
-        deleted_agg = cur.rowcount
 
-    return deleted_events, deleted_agg
+    return deleted_events
 
 
 def get_state(conn: PgConnection, key: str) -> str | None:

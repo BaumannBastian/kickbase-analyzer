@@ -352,12 +352,14 @@ kickbase-analyzer/
 
 ### V0.9-Plus (PostgreSQL History Store lokal)
 - [x] Docker-Setup fuer lokalen Postgres-Container + optional pgAdmin angelegt.
-- [x] Flyway-Migration fuer History-Schema (`dim_players`, `dim_event_types`, `fact_market_value`, `fact_match_performance`, `fact_match_events`, `fact_match_event_agg`, `etl_state`) angelegt.
+- [x] Flyway-Migration fuer History-Schema (`dim_players`, `dim_event_types`, `fact_market_value`, `fact_match_performance`, `fact_match_events`, `etl_state`) angelegt.
 - [x] Python-ETL fuer idempotente/inkrementelle Writes in Postgres aufgebaut (Databricks-Driver oder CSV-Fallback).
 - [x] Smoke-Test auf Einzelspieler (z.B. Orban) gegen echte API-Daten durchgefuehrt (Marktwert + Performance + Event-Breakdown in Postgres validiert).
 - [x] Eventtype-Mapping korrigiert: `/v4/live/eventtypes` (`i`/`ti`) wird vollstaendig geparst, Event-Namen sind damit in `dim_event_types` verfuegbar.
 - [x] Match-Kontext in History erweitert: `fact_match_performance` mit `is_home` und `match_result` (`W`/`D`/`L`) fuer direkte Win/Draw/Loss-Analysen.
 - [x] Legacy-`season_label='unknown'` in Event-Facts wird beim ETL-Lauf pro Spieler bereinigt, wenn bereits ein gleiches Event fuer eine bekannte Saison existiert.
+- [x] Source-unabhaengige Player-ID eingefuehrt: `player_uid` (`name_yyyymmdd`) ist in allen spielerbezogenen Fact-Tabellen erste Spalte/Key.
+- [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
 - [ ] Danach schrittweise auf Full-Roster hochskalieren (Rate-Limit/Retry beibehalten).
 
 ### Tomorrow (2026-02-22)

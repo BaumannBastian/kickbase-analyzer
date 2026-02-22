@@ -1,2 +1,2 @@
-player_id,name,team_id,team_name,position,competition_id
-1246,Willi Orban,1311,RB Leipzig,DEF,1
+player_id,name,team_id,team_name,position,competition_id,ligainsider_player_slug,ligainsider_player_id,birth_date
+1246,Willi Orban,1311,RB Leipzig,DEF,1,willi-orban,1667,1992-11-03

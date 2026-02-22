@@ -64,9 +64,16 @@ class HistoryEtlParserTests(unittest.TestCase):
             ]
         }
 
-        rows = parse_performance_rows(payload, player_id=1246, competition_id=1)
+        rows = parse_performance_rows(
+            payload,
+            player_uid="willi_orban_19921103",
+            player_id=1246,
+            competition_id=1,
+            active_season_label="2025/2026",
+        )
         by_day = {row["matchday"]: row for row in rows}
 
+        self.assertEqual(by_day[23]["player_uid"], "willi_orban_19921103")
         self.assertEqual(by_day[23]["season_label"], "2025/2026")
         self.assertTrue(by_day[23]["is_home"])
         self.assertEqual(by_day[23]["match_result"], "D")

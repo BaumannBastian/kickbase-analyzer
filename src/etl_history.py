@@ -23,7 +23,11 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any, Iterable
+import unicodedata
+
+import requests
 
 try:
     from dotenv import load_dotenv
@@ -43,6 +47,9 @@ class PlayerMaster:
     team_name: str | None
     position: str | None
     competition_id: int | None
+    ligainsider_player_slug: str | None
+    ligainsider_player_id: int | None
+    birth_date: date | None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -100,7 +107,10 @@ def _default_databricks_query(table: str) -> str:
         CAST(team_id AS BIGINT) AS team_id,
         CAST(NULL AS STRING) AS team_name,
         position,
-        CAST(NULL AS BIGINT) AS competition_id
+        CAST(NULL AS BIGINT) AS competition_id,
+        CAST(NULL AS STRING) AS ligainsider_player_slug,
+        CAST(NULL AS BIGINT) AS ligainsider_player_id,
+        CAST(NULL AS DATE) AS birth_date
     FROM {table}
     WHERE kickbase_player_id IS NOT NULL
     """
@@ -169,6 +179,13 @@ def _player_from_mapping(row: dict[str, Any]) -> PlayerMaster | None:
         team_name=_to_text_or_none(_first_present(row, ["team_name", "team"])) ,
         position=_to_text_or_none(_first_present(row, ["position", "pos"])),
         competition_id=_to_int(_first_present(row, ["competition_id", "competitionid", "cpi"])),
+        ligainsider_player_slug=_to_text_or_none(
+            _first_present(row, ["ligainsider_player_slug", "li_player_slug", "ligainsider_slug"])
+        ),
+        ligainsider_player_id=_to_int(
+            _first_present(row, ["ligainsider_player_id", "li_player_id", "ligainsider_id"])
+        ),
+        birth_date=_parse_date(_first_present(row, ["birth_date", "birthday", "dob"])),
     )
 
 
@@ -191,6 +208,182 @@ def select_players(players: list[PlayerMaster], args: argparse.Namespace) -> lis
     if not out:
         raise RuntimeError("Nach Filtern sind keine Spieler uebrig")
     return out
+
+
+def load_latest_ligainsider_name_map(input_dir: Path) -> dict[str, dict[str, Any]]:
+    files = sorted(input_dir.glob("ligainsider_status_snapshot_*.ndjson"))
+    if not files:
+        return {}
+
+    latest = max(files, key=lambda path: path.name)
+    mapping: dict[str, dict[str, Any]] = {}
+    collisions: set[str] = set()
+    with latest.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                row = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            name = _to_text(_first_present(row, ["player_name", "name"]))
+            if not name:
+                continue
+            key = _normalize_name(name)
+            if not key:
+                continue
+            existing = mapping.get(key)
+            if existing is not None:
+                collisions.add(key)
+                continue
+            mapping[key] = row
+
+    for key in collisions:
+        mapping.pop(key, None)
+
+    if collisions:
+        LOGGER.warning(
+            "LigaInsider Name-Kollisionen im Snapshot erkannt: %s Namen werden fuer Birthdate-Mapping ignoriert.",
+            len(collisions),
+        )
+    return mapping
+
+
+def resolve_player_identity(
+    *,
+    player: PlayerMaster,
+    existing_identity: Any,
+    ligainsider_name_map: dict[str, dict[str, Any]],
+    ligainsider_birthdate_cache: dict[str, date | None],
+    ligainsider_session: requests.Session,
+    ligainsider_timeout_seconds: float,
+) -> dict[str, Any]:
+    birth_date = player.birth_date
+    ligainsider_slug = player.ligainsider_player_slug
+    ligainsider_player_id = player.ligainsider_player_id
+
+    if existing_identity is not None:
+        if birth_date is None:
+            birth_date = existing_identity.birth_date
+        if not ligainsider_slug:
+            ligainsider_slug = existing_identity.ligainsider_player_slug
+        if ligainsider_player_id is None:
+            ligainsider_player_id = existing_identity.ligainsider_player_id
+
+    if not ligainsider_slug:
+        li_row = ligainsider_name_map.get(_normalize_name(player.name))
+        if li_row is not None:
+            ligainsider_slug = _to_text_or_none(li_row.get("ligainsider_player_slug"))
+            ligainsider_player_id = _to_int(li_row.get("ligainsider_player_id"))
+
+    if birth_date is None and ligainsider_slug:
+        birth_date = ligainsider_birthdate_cache.get(ligainsider_slug)
+        if birth_date is None:
+            birth_date = fetch_ligainsider_birth_date(
+                session=ligainsider_session,
+                slug=ligainsider_slug,
+                ligainsider_player_id=ligainsider_player_id,
+                timeout_seconds=ligainsider_timeout_seconds,
+            )
+            ligainsider_birthdate_cache[ligainsider_slug] = birth_date
+
+    if existing_identity is not None and birth_date is None:
+        player_uid = existing_identity.player_uid
+    else:
+        player_uid = build_player_uid(player.name, birth_date)
+
+    return {
+        "player_uid": player_uid,
+        "birth_date": birth_date,
+        "ligainsider_player_slug": ligainsider_slug,
+        "ligainsider_player_id": ligainsider_player_id,
+    }
+
+
+def fetch_ligainsider_birth_date(
+    *,
+    session: requests.Session,
+    slug: str,
+    ligainsider_player_id: int | None,
+    timeout_seconds: float,
+) -> date | None:
+    base_url = os.getenv("LIGAINSIDER_BASE_URL", "https://www.ligainsider.de").rstrip("/")
+    url_candidates: list[str] = []
+    if ligainsider_player_id is not None:
+        url_candidates.append(f"{base_url}/{slug}_{ligainsider_player_id}/")
+    url_candidates.append(f"{base_url}/{slug}/")
+
+    headers = {
+        "User-Agent": os.getenv("LIGAINSIDER_USER_AGENT", "kickbase-analyzer/1.0"),
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    for url in url_candidates:
+        try:
+            response = session.get(url, timeout=timeout_seconds, headers=headers)
+        except requests.RequestException:
+            continue
+        if response.status_code >= 400:
+            continue
+        birth_date = _extract_birth_date_from_ligainsider_html(response.text)
+        if birth_date is not None:
+            return birth_date
+    return None
+
+
+def _extract_birth_date_from_ligainsider_html(html_text: str) -> date | None:
+    patterns = [
+        r'"birthDate"\s*:\s*"(?P<iso>\d{4}-\d{2}-\d{2})"',
+        r"Geburtstag[^0-9]{0,40}(?P<de>\d{2}\.\d{2}\.\d{4})",
+        r"geboren[^0-9]{0,40}(?P<de>\d{2}\.\d{2}\.\d{4})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html_text, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        if "iso" in match.groupdict():
+            parsed = _parse_date(match.group("iso"))
+            if parsed is not None:
+                return parsed
+        if "de" in match.groupdict():
+            parsed = _parse_date(match.group("de"))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def build_player_uid(name: str, birth_date: date | None) -> str:
+    normalized_name = _normalize_name(name)
+    birth_token = birth_date.strftime("%Y%m%d") if birth_date is not None else "00000000"
+    return f"{normalized_name}_{birth_token}"
+
+
+def _normalize_name(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^A-Za-z0-9]+", "_", text)
+    text = text.strip("_").lower()
+    return text or "unknown_player"
+
+
+def build_match_lookup(payload: dict[str, Any] | list[Any]) -> dict[tuple[int, int, int], dict[str, Any]]:
+    lookup: dict[tuple[int, int, int], dict[str, Any]] = {}
+    for row in extract_rows(payload):
+        day = _to_int(_first_present(row, ["day", "dayNumber", "matchday"]))
+        matches = row.get("it") if isinstance(row, dict) else None
+        if day is None or not isinstance(matches, list):
+            continue
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            t1 = _to_int(match.get("t1"))
+            t2 = _to_int(match.get("t2"))
+            if t1 is None or t2 is None:
+                continue
+            lookup[(day, t1, t2)] = match
+    return lookup
 
 
 def extract_rows(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
@@ -287,6 +480,7 @@ def parse_event_types(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any
 def parse_market_value_history(
     payload: dict[str, Any] | list[Any],
     *,
+    player_uid: str,
     player_id: int,
 ) -> list[dict[str, Any]]:
     rows = extract_rows(payload)
@@ -303,6 +497,7 @@ def parse_market_value_history(
 
         out.append(
             {
+                "player_uid": player_uid,
                 "player_id": player_id,
                 "mv_date": dt.date(),
                 "market_value": market_value,
@@ -321,13 +516,17 @@ def parse_market_value_history(
 def parse_performance_rows(
     payload: dict[str, Any] | list[Any],
     *,
+    player_uid: str,
     player_id: int,
     competition_id: int,
+    active_season_label: str,
+    match_lookup: dict[tuple[int, int, int], dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     rows = _extract_performance_entries(payload)
     out: list[dict[str, Any]] = []
 
     for row, season_label in rows:
+        season_label_safe = season_label or "unknown"
         matchday = _to_int(_first_present(row, ["matchday", "dayNumber", "spieltag", "day"]))
         points_total = _to_int(_first_present(row, ["p", "points", "pts", "total_points"]))
         if matchday is None or points_total is None:
@@ -358,6 +557,29 @@ def parse_performance_rows(
                 elif t2 == team_id:
                     opponent_team_id = t1
 
+        if (
+            match_lookup is not None
+            and season_label_safe == active_season_label
+            and matchday is not None
+            and t1 is not None
+            and t2 is not None
+        ):
+            lookup_match = match_lookup.get((matchday, t1, t2))
+            if lookup_match is None:
+                lookup_match = match_lookup.get((matchday, t2, t1))
+            if isinstance(lookup_match, dict):
+                if match_ts is None:
+                    match_ts = _parse_datetime(lookup_match.get("dt"))
+                if opponent_name := _infer_opponent_short_name(
+                    lookup_match=lookup_match,
+                    team_id=team_id,
+                    t1=t1,
+                    t2=t2,
+                ):
+                    row["opponent_name"] = opponent_name
+                if row.get("match_id") is None:
+                    row["match_id"] = _to_int(lookup_match.get("mi"))
+
         is_home: bool | None = None
         if team_id is not None and t1 is not None and t2 is not None:
             if team_id == t1:
@@ -376,19 +598,32 @@ def parse_performance_rows(
             else:
                 match_result = "D"
 
+        opponent_name = _to_text_or_none(
+            _first_present(row, ["opponent_name", "opp", "opponent"])
+        )
+
+        match_uid = _build_match_uid(
+            competition_id=competition_id,
+            season_label=season_label_safe,
+            matchday=matchday,
+            match_ts=match_ts,
+            t1=t1,
+            t2=t2,
+        )
+
         out.append(
             {
+                "player_uid": player_uid,
                 "player_id": player_id,
                 "competition_id": competition_id,
-                "season_label": season_label or "unknown",
+                "season_label": season_label_safe,
                 "matchday": matchday,
+                "match_uid": match_uid,
                 "match_id": _to_int(_first_present(row, ["match_id", "matchId", "mid", "m" ])),
                 "match_ts": match_ts,
                 "team_id": team_id,
                 "opponent_team_id": opponent_team_id,
-                "opponent_name": _to_text_or_none(
-                    _first_present(row, ["opponent_name", "opp", "opponent"])
-                ),
+                "opponent_name": opponent_name,
                 "is_home": is_home,
                 "score_home": score_home,
                 "score_away": score_away,
@@ -436,10 +671,13 @@ def _extract_performance_entries(payload: dict[str, Any] | list[Any]) -> list[tu
 def parse_playercenter_events(
     payload: dict[str, Any] | list[Any],
     *,
+    player_uid: str,
     player_id: int,
     competition_id: int,
     season_label: str,
     matchday: int,
+    match_uid: str | None,
+    event_type_name_map: dict[int, str],
 ) -> list[dict[str, Any]]:
     event_dicts = _find_event_dicts(payload)
     rows: list[dict[str, Any]] = []
@@ -465,11 +703,14 @@ def parse_playercenter_events(
 
         rows.append(
             {
+                "player_uid": player_uid,
                 "player_id": player_id,
                 "competition_id": competition_id,
                 "season_label": season_label,
                 "matchday": matchday,
+                "match_uid": match_uid,
                 "event_type_id": event_type_id,
+                "event_name": event_type_name_map.get(event_type_id, f"event_{event_type_id}"),
                 "points": points,
                 "mt": mt,
                 "att": att,
@@ -529,6 +770,48 @@ def _build_event_dedup_key(
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
+def _build_match_uid(
+    *,
+    competition_id: int,
+    season_label: str,
+    matchday: int,
+    match_ts: datetime | None,
+    t1: int | None,
+    t2: int | None,
+) -> str:
+    team_left = min(t1, t2) if t1 is not None and t2 is not None else -1
+    team_right = max(t1, t2) if t1 is not None and t2 is not None else -1
+    ts_token = match_ts.isoformat() if match_ts is not None else "na"
+    return "|".join(
+        [
+            str(competition_id),
+            season_label or "unknown",
+            str(matchday),
+            ts_token,
+            str(team_left),
+            str(team_right),
+        ]
+    )
+
+
+def _infer_opponent_short_name(
+    *,
+    lookup_match: dict[str, Any],
+    team_id: int | None,
+    t1: int | None,
+    t2: int | None,
+) -> str | None:
+    if team_id is None or t1 is None or t2 is None:
+        return None
+    t1_symbol = _to_text_or_none(lookup_match.get("t1sy"))
+    t2_symbol = _to_text_or_none(lookup_match.get("t2sy"))
+    if team_id == t1:
+        return t2_symbol
+    if team_id == t2:
+        return t1_symbol
+    return None
+
+
 def _parse_score(text: str) -> tuple[int, int] | None:
     cleaned = text.replace(" ", "")
     if ":" not in cleaned:
@@ -574,6 +857,28 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
 
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _parse_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _first_present(row: dict[str, Any], keys: Iterable[str]) -> Any:
@@ -638,8 +943,8 @@ def main(argv: list[str] | None = None) -> int:
             DbConfig,
             cleanup_unknown_event_rows_for_player,
             get_connection,
+            get_existing_player_identity_by_player_id,
             get_max_market_value_date,
-            refresh_match_event_agg,
             set_state,
             upsert_event_types,
             upsert_market_values,
@@ -656,6 +961,10 @@ def main(argv: list[str] | None = None) -> int:
 
     players = load_players(args)
     players = select_players(players, args)
+    ligainsider_name_map = load_latest_ligainsider_name_map(Path("data/bronze"))
+    ligainsider_birthdate_cache: dict[str, date | None] = {}
+    ligainsider_session = requests.Session()
+    ligainsider_timeout_seconds = float(os.getenv("LIGAINSIDER_TIMEOUT_SECONDS", "15"))
 
     kb_config = KickbaseApiConfig.from_env(rps=args.rps)
     if not kb_config.email or not kb_config.password:
@@ -673,7 +982,6 @@ def main(argv: list[str] | None = None) -> int:
         "performance_updated": 0,
         "match_events_inserted": 0,
         "match_events_unknown_cleanup_deleted": 0,
-        "match_event_agg_unknown_cleanup_deleted": 0,
         "event_types_inserted": 0,
         "event_types_updated": 0,
         "earliest_marketvalue_date": None,
@@ -712,9 +1020,15 @@ def main(argv: list[str] | None = None) -> int:
     season_label = args.season_label or detect_season_label(matchdays_payload) or default_season_label()
     if str(season_label).strip().lower() in {"", "unknown"}:
         season_label = default_season_label()
+    match_lookup = build_match_lookup(matchdays_payload)
 
     event_types_payload = client.get_event_types(token)
     event_types = parse_event_types(event_types_payload)
+    event_type_name_map = {
+        int(row["event_type_id"]): str(row["name"])
+        for row in event_types
+        if row.get("event_type_id") is not None
+    }
 
     with get_connection(db_config) as conn:
         inserted, updated = upsert_event_types(conn, event_types)
@@ -737,13 +1051,27 @@ def main(argv: list[str] | None = None) -> int:
                 player.player_id,
                 player_competition_id,
             )
+            existing_identity = get_existing_player_identity_by_player_id(conn, player.player_id)
+            identity = resolve_player_identity(
+                player=player,
+                existing_identity=existing_identity,
+                ligainsider_name_map=ligainsider_name_map,
+                ligainsider_birthdate_cache=ligainsider_birthdate_cache,
+                ligainsider_session=ligainsider_session,
+                ligainsider_timeout_seconds=ligainsider_timeout_seconds,
+            )
+            player_uid = str(identity["player_uid"])
 
             upsert_players(
                 conn,
                 [
                     {
+                        "player_uid": player_uid,
                         "player_id": player.player_id,
                         "name": player.name,
+                        "birth_date": identity["birth_date"],
+                        "ligainsider_player_slug": identity["ligainsider_player_slug"],
+                        "ligainsider_player_id": identity["ligainsider_player_id"],
                         "team_id": player.team_id,
                         "team_name": player.team_name,
                         "position": player.position,
@@ -764,10 +1092,14 @@ def main(argv: list[str] | None = None) -> int:
                     / str(player.player_id)
                     / f"marketvalue_{player_competition_id}_{args.timeframe_days}.json",
                     market_payload,
-                )
+                    )
 
-            market_rows = parse_market_value_history(market_payload, player_id=player.player_id)
-            max_existing_date = get_max_market_value_date(conn, player.player_id)
+            market_rows = parse_market_value_history(
+                market_payload,
+                player_uid=player_uid,
+                player_id=player.player_id,
+            )
+            max_existing_date = get_max_market_value_date(conn, player_uid)
             if max_existing_date is not None:
                 market_rows = [row for row in market_rows if row["mv_date"] > max_existing_date]
 
@@ -797,14 +1129,21 @@ def main(argv: list[str] | None = None) -> int:
 
             perf_rows = parse_performance_rows(
                 performance_payload,
+                player_uid=player_uid,
                 player_id=player.player_id,
                 competition_id=player_competition_id,
+                active_season_label=season_label,
+                match_lookup=match_lookup,
             )
             inserted_perf, updated_perf = upsert_match_performance(conn, perf_rows)
             summary["performance_inserted"] += inserted_perf
             summary["performance_updated"] += updated_perf
 
-            touched_days: set[int] = set()
+            match_uid_by_day = {
+                int(row["matchday"]): str(row["match_uid"])
+                for row in perf_rows
+                if str(row.get("season_label")) == season_label
+            }
             known_event_type_ids = {int(row["event_type_id"]) for row in event_types}
 
             for day_number in range(args.days_from, days_to + 1):
@@ -824,10 +1163,13 @@ def main(argv: list[str] | None = None) -> int:
 
                 event_rows = parse_playercenter_events(
                     playercenter_payload,
+                    player_uid=player_uid,
                     player_id=player.player_id,
                     competition_id=player_competition_id,
                     season_label=season_label,
                     matchday=day_number,
+                    match_uid=match_uid_by_day.get(day_number),
+                    event_type_name_map=event_type_name_map,
                 )
                 if event_rows:
                     missing_event_type_ids = sorted(
@@ -846,36 +1188,27 @@ def main(argv: list[str] | None = None) -> int:
                         summary["event_types_inserted"] += inserted_dyn
                         summary["event_types_updated"] += updated_dyn
                         known_event_type_ids.update(missing_event_type_ids)
+                        for row in dynamic_event_types:
+                            event_type_name_map[int(row["event_type_id"])] = str(row["name"])
 
                 inserted_events = insert_match_events(conn, event_rows)
                 summary["match_events_inserted"] += inserted_events
-                if event_rows:
-                    touched_days.add(day_number)
-
-            refresh_match_event_agg(
+            deleted_events = cleanup_unknown_event_rows_for_player(
                 conn,
-                player_id=player.player_id,
-                competition_id=player_competition_id,
-                season_label=season_label,
-                matchdays=touched_days,
-            )
-            deleted_events, deleted_agg = cleanup_unknown_event_rows_for_player(
-                conn,
-                player_id=player.player_id,
+                player_uid=player_uid,
                 competition_id=player_competition_id,
                 season_label=season_label,
             )
             summary["match_events_unknown_cleanup_deleted"] += deleted_events
-            summary["match_event_agg_unknown_cleanup_deleted"] += deleted_agg
 
             set_state(
                 conn,
-                f"last_marketvalue_date_{player.player_id}",
+                f"last_marketvalue_date_{player_uid}",
                 str(summary["latest_marketvalue_date"] or ""),
             )
             set_state(
                 conn,
-                f"last_matchday_processed_{player_competition_id}_{season_label}_{player.player_id}",
+                f"last_matchday_processed_{player_competition_id}_{season_label}_{player_uid}",
                 str(days_to),
             )
 

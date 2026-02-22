@@ -152,11 +152,12 @@ python -m src.etl_history --players-csv .\\in\\players.csv --max-players 5 --day
 - `fact_market_value`
 - `fact_match_performance`
 - `fact_match_events`
-- `fact_match_event_agg`
 - `etl_state`
 
 Wichtige Felder:
+- `dim_players.player_uid` (z.B. `willi_orban_19921103`) als source-unabhaengiger Schluessel
 - `fact_market_value.mv_date`, `fact_market_value.market_value`
+- `fact_match_performance.match_uid` fuer Match-Join auf Event-Ebene
 - `fact_match_performance.is_home` (`true`/`false`) und `fact_match_performance.match_result` (`W`/`D`/`L`)
 - `fact_match_events.event_type_id` + Join auf `dim_event_types.name` fuer lesbare Eventnamen
 

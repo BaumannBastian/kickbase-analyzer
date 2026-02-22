@@ -55,9 +55,9 @@ python -m src.etl_history --env-file .env --players-csv .\in\orban.csv --max-pla
 
 ```powershell
 docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "\dt"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_id, min(mv_date), max(mv_date), count(*) FROM fact_market_value GROUP BY 1;"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_id, competition_id, season_label, matchday, points_total, is_home, match_result FROM fact_match_performance ORDER BY season_label DESC, matchday DESC LIMIT 20;"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT e.player_id, e.season_label, e.matchday, e.event_type_id, t.name, e.points, e.mt FROM fact_match_events e LEFT JOIN dim_event_types t ON t.event_type_id=e.event_type_id ORDER BY e.season_label DESC, e.matchday DESC, e.mt ASC NULLS LAST LIMIT 25;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, min(mv_date), max(mv_date), count(*) FROM fact_market_value GROUP BY 1;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, competition_id, season_label, matchday, match_uid, points_total, is_home, match_result FROM fact_match_performance ORDER BY season_label DESC, matchday DESC LIMIT 20;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, season_label, matchday, match_uid, event_type_id, event_name, points, mt FROM fact_match_events ORDER BY season_label DESC, matchday DESC, mt ASC NULLS LAST LIMIT 25;"
 ```
 
 ## 6) Regelmaessiges Update (inkrementell)
