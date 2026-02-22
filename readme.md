@@ -147,22 +147,26 @@ python -m src.etl_history --players-csv .\\in\\players.csv --max-players 5 --day
 
 ### Wichtige Tabellen im lokalen Postgres
 
-- `dim_players`
-- `dim_event_types`
-- `fact_market_value`
-- `fact_match_performance`
-- `fact_match_events`
+Schema: `kickbase_raw`
+
+- `dim_player`
+- `dim_event_type`
+- `dim_team`
+- `dim_match`
+- `fact_market_value_daily`
+- `fact_player_match`
+- `fact_player_event`
 - `etl_state`
 
 Wichtige Felder:
-- `dim_players.player_uid` (z.B. `willi_orban_19921103`) als source-unabhaengiger Schluessel
-- `dim_players.kb_player_id` als explizite Kickbase-Referenz-ID
-- `dim_players.team_code` + `dim_players.team_name` im Format `RBL (RB Leipzig)`
-- `dim_players.player_image_url` fuer Spielerbilder (LigaInsider)
-- `fact_market_value.mv_date`, `fact_market_value.market_value`
-- `fact_match_performance.match_uid` im kompakten Format `25/26-MD23-BVBRBL`
-- `fact_match_performance.is_home` (`true`/`false`) und `fact_match_performance.match_result` (`W`/`D`/`L`)
-- `fact_match_events.event_type_id` + Join auf `dim_event_types.name` fuer lesbare Eventnamen
+- `dim_player.player_uid` (interner stabiler Schluessel)
+- `dim_player.kb_player_id` als explizite Kickbase-Referenz-ID
+- `dim_player.image_blob` (`BYTEA`) + `image_mime` + `image_sha256` fuer Spielerbilder
+- `dim_team.team_code` + `dim_team.team_name` im Format `RBL (RB Leipzig)`
+- `fact_market_value_daily.mv_date`, `fact_market_value_daily.market_value`
+- `fact_player_match.match_uid` im kompakten Format `25/26-MD23-RBLBVB`
+- `fact_player_match.is_home` (`true`/`false`) und `fact_player_match.match_result` (`W`/`D`/`L`)
+- `fact_player_event.event_type_id` + Join auf `dim_event_type.event_name` fuer lesbare Eventnamen
 
 ## Databricks / BigQuery / Power BI
 
@@ -205,14 +209,15 @@ Erledigt heute:
 - [x] CI-Fix fuer `Permission denied` bei Shell-Skripten
 - [x] README bereinigt (keine fehlerhaften ChatGPT-Referenzreste)
 - [x] PostgreSQL History Smoke-Test mit Orban erfolgreich (Market Value + Performance + Event-Breakdown)
-- [x] Eventtype-Mapping korrigiert (`/v4/live/eventtypes` mit `i/ti`) und in `dim_event_types` geladen
+- [x] Eventtype-Mapping korrigiert (`/v4/live/eventtypes` mit `i/ti`) und in `dim_event_type` geladen
 - [x] Performance um `is_home` + `match_result` (`W`/`D`/`L`) erweitert
 - [x] Legacy-Events mit `season_label='unknown'` pro Spieler-Lauf automatisch bereinigt
 - [x] History-Schema auf `kb_player_id` umgestellt (klar getrennt von internem `player_uid`)
-- [x] Kompakte `match_uid` eingefuehrt (`25/26-MD23-BVBRBL` statt Timestamp/Team-ID-Kombination)
-- [x] `dim_players` um `team_code` + `player_image_url` erweitert und Teamnamen im Format `RBL (RB Leipzig)` standardisiert
+- [x] Kompakte `match_uid` eingefuehrt (`25/26-MD23-RBLBVB` statt Timestamp/Team-ID-Kombination)
+- [x] Teamnamen auf Anzeigeformat `RBL (RB Leipzig)` standardisiert und Bildspeicherung auf `BYTEA` umgestellt
 
 Offen fuer morgen (V0.9):
+- [ ] Kickbase-Ingestion-Frequenzen entkoppeln (Marktwert taeglich, Performance an Spieltagen, Status/Lineup intraday).
 - [ ] Bronze QA: Teamnamen-Normalisierung Odds -> Club-Mapping vorbereiten
 - [ ] Silver Tabelle `player_snapshot` bauen (nur Sammeln/Joinen, noch keine Modelllogik)
 - [ ] Silver Tabelle `team_matchup_snapshot` bauen

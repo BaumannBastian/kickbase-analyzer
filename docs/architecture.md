@@ -335,6 +335,7 @@ kickbase-analyzer/
 ### V1.0 (Data Quality + Modeling Upgrade)
 - [x] Kickbase Feldmapping validieren (`smc` vs `ismc`) und `average_minutes` korrekt auf Einsaetzen statt Starts berechnen (inkl. Guard gegen Division durch 0).
 - [ ] Kickbase `team_id` Mapping dokumentieren und in eine Team-Dimension ueberfuehren (`kickbase_team_id` -> club_name, season, canonical_team_uid), damit IDs >18 nachvollziehbar sind.
+- [ ] Kickbase-Ingestion-Frequenzen entkoppeln: eigener Mode fuer Marktwert (taeglich 22:04), Performance/Stats (Spieltage) und Status/Lineup (mehrfach taeglich), um API-Calls zu minimieren.
 - [ ] Marktwert-Historie in Bronze vervollstaendigen: 10-Tage-Tuples pro Spieler, `market_value_high_365d`, `market_value_low_365d` aus echter Historie statt Current-Value-Fallback.
 - [ ] Fallback-Strategie fuer Marktwert-Historie implementieren, falls kein dedizierter API-Endpunkt verfuegbar ist (Historisierung aus taeglichen Snapshots).
 - [x] LigaInsider Konkurrenz-Extraktion auf UI-Logik umstellen: Positions-Kandidaten ueber den gruennen Pfeil/Carousel pro Spieler erfassen.
@@ -352,18 +353,18 @@ kickbase-analyzer/
 
 ### V0.9-Plus (PostgreSQL History Store lokal)
 - [x] Docker-Setup fuer lokalen Postgres-Container + optional pgAdmin angelegt.
-- [x] Flyway-Migration fuer History-Schema (`dim_players`, `dim_event_types`, `fact_market_value`, `fact_match_performance`, `fact_match_events`, `etl_state`) angelegt.
+- [x] Flyway-Migration fuer History-Schema (`dim_player`, `dim_event_type`, `dim_team`, `dim_match`, `fact_market_value_daily`, `fact_player_match`, `fact_player_event`, `etl_state`) angelegt.
 - [x] Python-ETL fuer idempotente/inkrementelle Writes in Postgres aufgebaut (Databricks-Driver oder CSV-Fallback).
 - [x] Smoke-Test auf Einzelspieler (z.B. Orban) gegen echte API-Daten durchgefuehrt (Marktwert + Performance + Event-Breakdown in Postgres validiert).
-- [x] Eventtype-Mapping korrigiert: `/v4/live/eventtypes` (`i`/`ti`) wird vollstaendig geparst, Event-Namen sind damit in `dim_event_types` verfuegbar.
-- [x] Match-Kontext in History erweitert: `fact_match_performance` mit `is_home` und `match_result` (`W`/`D`/`L`) fuer direkte Win/Draw/Loss-Analysen.
+- [x] Eventtype-Mapping korrigiert: `/v4/live/eventtypes` (`i`/`ti`) wird vollstaendig geparst, Event-Namen sind damit in `dim_event_type` verfuegbar.
+- [x] Match-Kontext in History erweitert: `fact_player_match` mit `is_home` und `match_result` (`W`/`D`/`L`) fuer direkte Win/Draw/Loss-Analysen.
 - [x] Legacy-`season_label='unknown'` in Event-Facts wird beim ETL-Lauf pro Spieler bereinigt, wenn bereits ein gleiches Event fuer eine bekannte Saison existiert.
 - [x] Source-unabhaengige Player-ID eingefuehrt: `player_uid` (`name_yyyymmdd`) ist in allen spielerbezogenen Fact-Tabellen erste Spalte/Key.
-- [x] Kickbase-Source-ID explizit umbenannt: `player_id` -> `kb_player_id` in `dim_players` und allen spielerbezogenen Fact-Tabellen.
-- [x] Match-ID auf kompaktes, lesbares Format umgestellt: `match_uid = <yy/yy>-MD<spieltag>-<teamcode_pair>` (z.B. `25/26-MD23-BVBRBL`).
-- [x] `fact_match_performance` verschlankt: `match_ts` und `opponent_name` entfernt (ableitbar ueber `match_uid`, Teamcodes und Match-Kontext).
-- [x] Team-Normalisierung in `dim_players`: `team_code` eingefuehrt und `team_name` auf Anzeigeformat `RBL (RB Leipzig)` standardisiert.
-- [x] Spielerbild-Feld in `dim_players` ergaenzt: `player_image_url` wird aus LigaInsider-Profilseiten erfasst.
+- [x] Kickbase-Source-ID explizit umbenannt: `player_id` -> `kb_player_id` in `dim_player`.
+- [x] Match-ID auf kompaktes, lesbares Format umgestellt: `match_uid = <yy/yy>-MD<spieltag>-<home_code><away_code>` (z.B. `25/26-MD23-RBLBVB`).
+- [x] `fact_player_match` verschlankt: kein redundantes `opponent_name`; Kontext laeuft ueber `dim_match`.
+- [x] Team-Normalisierung in `dim_team`: `team_code` eingefuehrt und `team_name` auf Anzeigeformat `RBL (RB Leipzig)` standardisiert.
+- [x] Spielerbild-Feld in `dim_player` ergaenzt: Bilddaten als `BYTEA` + `image_mime` + `image_sha256`.
 - [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
 - [ ] Danach schrittweise auf Full-Roster hochskalieren (Rate-Limit/Retry beibehalten).
 

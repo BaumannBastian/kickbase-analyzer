@@ -29,9 +29,9 @@ class HistoryEtlParserTests(unittest.TestCase):
         by_id = {row["event_type_id"]: row for row in rows}
 
         self.assertIn(3337, by_id)
-        self.assertEqual(by_id[3337]["name"], "Forward zone pass")
+        self.assertEqual(by_id[3337]["event_name"], "Forward zone pass")
         self.assertIn(-8, by_id)
-        self.assertEqual(by_id[-8]["name"], "Von Anfang an gespielt")
+        self.assertEqual(by_id[-8]["event_name"], "Von Anfang an gespielt")
 
     def test_parse_performance_rows_derives_home_away_and_result(self) -> None:
         payload = {
@@ -66,19 +66,17 @@ class HistoryEtlParserTests(unittest.TestCase):
 
         rows = parse_performance_rows(
             payload,
-            player_uid="willi_orban_19921103",
-            kb_player_id=1246,
-            competition_id=1,
+            player_uid=1246,
             active_season_label="2025/2026",
             team_code_by_team_id={43: "RBL", 3: "BVB", 11: "WOB"},
         )
         by_day = {row["matchday"]: row for row in rows}
 
-        self.assertEqual(by_day[23]["player_uid"], "willi_orban_19921103")
+        self.assertEqual(by_day[23]["player_uid"], 1246)
         self.assertEqual(by_day[23]["season_label"], "2025/2026")
         self.assertTrue(by_day[23]["is_home"])
         self.assertEqual(by_day[23]["match_result"], "D")
-        self.assertEqual(by_day[23]["match_uid"], "25/26-MD23-BVBRBL")
+        self.assertEqual(by_day[23]["match_uid"], "25/26-MD23-RBLBVB")
 
         self.assertFalse(by_day[22]["is_home"])
         self.assertEqual(by_day[22]["match_result"], "W")

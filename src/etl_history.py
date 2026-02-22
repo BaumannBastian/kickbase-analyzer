@@ -1,15 +1,18 @@
 # ------------------------------------
 # etl_history.py
 #
-# ETL-Pipeline fuer Kickbase-History nach PostgreSQL.
-# Laedt Spielerliste aus Databricks oder CSV und schreibt
-# Marktwert-Historie, Match-Performance und Event-Breakdowns
-# idempotent/inkrementell in Postgres.
+# ETL-Pipeline fuer Kickbase-History in PostgreSQL (RAW-Star-Schema).
+# Laedt Spielertreiber aus Databricks oder CSV und schreibt:
+# - Marktwert-Historie
+# - Match-Performance
+# - Event-Breakdowns
+# - Spielerbilder als BYTEA (JPG/PNG)
 #
 # Usage
 # ------------------------------------
 # - python -m src.etl_history --players-csv ./in/players.csv --max-players 1
-# - python -m src.etl_history --max-players 5 --days-from 1 --days-to 3
+# - python -m src.etl_history --max-players 25 --days-from 1
+# - python -m src.etl_history --players-csv ./in/players.csv --export-dir ./out/postgres_export
 # ------------------------------------
 
 from __future__ import annotations
@@ -24,9 +27,10 @@ import logging
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any, Iterable
-import unicodedata
 from urllib.parse import urljoin
+import unicodedata
 
 import requests
 
@@ -39,7 +43,10 @@ except ModuleNotFoundError:
 
 LOGGER = logging.getLogger("kickbase_history_etl")
 
-DEFAULT_TEAM_NAME_BY_CODE = {
+RETRYABLE_IMAGE_STATUS_CODES = {429, 500, 502, 503, 504}
+ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png"}
+
+DEFAULT_TEAM_FULL_NAME_BY_CODE = {
     "B04": "Bayer Leverkusen",
     "BMG": "Bor. M'gladbach",
     "BVB": "Borussia Dortmund",
@@ -63,42 +70,73 @@ DEFAULT_TEAM_NAME_BY_CODE = {
 
 @dataclass(frozen=True)
 class PlayerMaster:
-    kb_player_id: int
-    name: str
-    team_id: int | None
+    player_uid: int
+    kb_player_id: int | None
+    player_name: str
+    kickbase_team_id: int | None
+    team_code: str | None
     team_name: str | None
     position: str | None
+    league_key: str | None
     competition_id: int | None
     ligainsider_player_slug: str | None
     ligainsider_player_id: int | None
-    birth_date: date | None
-    player_image_url: str | None
+    birthdate: date | None
+    image_url: str | None
+
+
+@dataclass(frozen=True)
+class ImageLoadResult:
+    image_blob: bytes | None
+    image_mime: str | None
+    image_sha256: str | None
+    status: str
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Kickbase history ETL -> PostgreSQL")
+    parser = argparse.ArgumentParser(description="Kickbase history ETL -> PostgreSQL RAW schema")
     parser.add_argument("--env-file", default=".env", help="Pfad zur .env Datei")
-    parser.add_argument("--players-csv", default=None, help="Fallback CSV mit kb_player_id,name,...")
+    parser.add_argument("--players-csv", default=None, help="Fallback CSV mit player_uid/kb_player_id")
     parser.add_argument("--competition-id", type=int, default=None)
     parser.add_argument("--competition-name", default="Bundesliga")
     parser.add_argument("--league-id", default=os.getenv("KICKBASE_LEAGUE_ID", ""))
+    parser.add_argument("--league-key", default=os.getenv("KICKBASE_LEAGUE_KEY", "bundesliga_1"))
     parser.add_argument("--max-players", type=int, default=None)
     parser.add_argument(
         "--player-id",
         type=int,
         action="append",
         default=[],
-        help="Filter auf Kickbase-Spieler-ID (kb_player_id), mehrfach nutzbar",
+        help="Filter auf kb_player_id (mehrfach nutzbar)",
+    )
+    parser.add_argument(
+        "--player-uid",
+        type=int,
+        action="append",
+        default=[],
+        help="Filter auf internen player_uid (mehrfach nutzbar)",
     )
     parser.add_argument("--player-name-like", default=None)
     parser.add_argument("--rps", type=float, default=3.0)
     parser.add_argument("--timeframe-days", type=int, default=3650)
     parser.add_argument("--days-from", type=int, default=1)
     parser.add_argument("--days-to", type=int, default=None)
-    parser.add_argument("--season-label", default=None, help="Override fuer Event-Saison, z.B. 2025/2026")
+    parser.add_argument("--season-label", default=None, help="Override fuer Saisonlabel, z.B. 2025/2026")
     parser.add_argument("--save-raw", action="store_true")
     parser.add_argument("--raw-dir", default="out/raw")
     parser.add_argument("--databricks-query", default=None)
+
+    parser.add_argument("--skip-image-download", action="store_true")
+    parser.add_argument("--image-timeout-seconds", type=float, default=float(os.getenv("IMAGE_TIMEOUT_SECONDS", "20")))
+    parser.add_argument("--image-max-bytes", type=int, default=int(os.getenv("IMAGE_MAX_BYTES", str(5 * 1024 * 1024))))
+    parser.add_argument("--image-retries", type=int, default=int(os.getenv("IMAGE_RETRIES", "2")))
+    parser.add_argument("--image-backoff-seconds", type=float, default=float(os.getenv("IMAGE_BACKOFF_SECONDS", "1")))
+    parser.add_argument("--image-cache-dir", default=os.getenv("IMAGE_CACHE_DIR", ".cache/player_images"))
+
+    parser.add_argument("--export-dir", default=None, help="Optionales Exportverzeichnis fuer CSV/Bilder")
+    parser.add_argument("--export-tables", action="store_true", help="Exportiert Tabellen als CSV (ohne image_blob)")
+    parser.add_argument("--export-images", action="store_true", help="Exportiert image_blob nach Dateien + Mapping CSV")
+
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args(argv)
 
@@ -131,16 +169,19 @@ def load_players(args: argparse.Namespace) -> list[PlayerMaster]:
 def _default_databricks_query(table: str) -> str:
     return f"""
     SELECT DISTINCT
+        CAST(kickbase_player_id AS BIGINT) AS player_uid,
         CAST(kickbase_player_id AS BIGINT) AS kb_player_id,
-        player_name AS name,
-        CAST(team_id AS BIGINT) AS team_id,
+        player_name,
+        CAST(team_id AS BIGINT) AS kickbase_team_id,
+        CAST(NULL AS STRING) AS team_code,
         CAST(NULL AS STRING) AS team_name,
         position,
+        CAST(NULL AS STRING) AS league_key,
         CAST(NULL AS BIGINT) AS competition_id,
         CAST(NULL AS STRING) AS ligainsider_player_slug,
         CAST(NULL AS BIGINT) AS ligainsider_player_id,
-        CAST(NULL AS DATE) AS birth_date,
-        CAST(NULL AS STRING) AS player_image_url
+        CAST(NULL AS DATE) AS birthdate,
+        CAST(NULL AS STRING) AS image_url
     FROM {table}
     WHERE kickbase_player_id IS NOT NULL
     """
@@ -166,9 +207,9 @@ def _load_players_from_databricks(query: str) -> list[PlayerMaster]:
     ) as conn:
         with conn.cursor() as cur:
             cur.execute(query)
-            cols = [str(desc[0]).lower() for desc in cur.description]
+            columns = [str(desc[0]).lower() for desc in cur.description]
             for raw in cur.fetchall():
-                row = dict(zip(cols, raw, strict=False))
+                row = dict(zip(columns, raw, strict=False))
                 player = _player_from_mapping(row)
                 if player is not None:
                     rows.append(player)
@@ -196,18 +237,26 @@ def _load_players_from_csv(path: Path) -> list[PlayerMaster]:
 
 
 def _player_from_mapping(row: dict[str, Any]) -> PlayerMaster | None:
-    kb_player_id = _to_int(_first_present(row, ["kb_player_id", "player_id", "kickbase_player_id", "id", "i", "pi"]))
-    if kb_player_id is None:
+    kb_player_id = _to_int(
+        _first_present(row, ["kb_player_id", "kickbase_player_id", "player_id", "id", "pi"])
+    )
+    player_uid = _to_int(_first_present(row, ["player_uid", "uid", "internal_player_uid"]))
+    if player_uid is None and kb_player_id is not None:
+        player_uid = kb_player_id
+    if player_uid is None:
         return None
 
-    name = _to_text(_first_present(row, ["name", "player_name", "n"])) or f"player_{kb_player_id}"
+    player_name = _to_text(_first_present(row, ["player_name", "name", "n"])) or f"player_{player_uid}"
 
     return PlayerMaster(
+        player_uid=player_uid,
         kb_player_id=kb_player_id,
-        name=name,
-        team_id=_to_int(_first_present(row, ["team_id", "tid", "t" ])),
-        team_name=_to_text_or_none(_first_present(row, ["team_name", "team"])) ,
+        player_name=player_name,
+        kickbase_team_id=_to_int(_first_present(row, ["kickbase_team_id", "team_id", "tid", "t"])),
+        team_code=_normalize_team_code(_to_text_or_none(_first_present(row, ["team_code", "team_symbol", "team_short"]))),
+        team_name=_to_text_or_none(_first_present(row, ["team_name", "team"])),
         position=_to_text_or_none(_first_present(row, ["position", "pos"])),
+        league_key=_to_text_or_none(_first_present(row, ["league_key", "league", "competition_key"])),
         competition_id=_to_int(_first_present(row, ["competition_id", "competitionid", "cpi"])),
         ligainsider_player_slug=_to_text_or_none(
             _first_present(row, ["ligainsider_player_slug", "li_player_slug", "ligainsider_slug"])
@@ -215,9 +264,20 @@ def _player_from_mapping(row: dict[str, Any]) -> PlayerMaster | None:
         ligainsider_player_id=_to_int(
             _first_present(row, ["ligainsider_player_id", "li_player_id", "ligainsider_id"])
         ),
-        birth_date=_parse_date(_first_present(row, ["birth_date", "birthday", "dob"])),
-        player_image_url=_to_text_or_none(
-            _first_present(row, ["player_image_url", "ligainsider_image_url", "image_url", "image"])
+        birthdate=_parse_date(_first_present(row, ["birthdate", "birth_date", "birthday", "dob"])),
+        image_url=_normalize_image_url(
+            _to_text_or_none(
+                _first_present(
+                    row,
+                    [
+                        "image_url",
+                        "player_image_url",
+                        "image",
+                        "player_image",
+                        "pim",
+                    ],
+                )
+            )
         ),
     )
 
@@ -225,15 +285,21 @@ def _player_from_mapping(row: dict[str, Any]) -> PlayerMaster | None:
 def select_players(players: list[PlayerMaster], args: argparse.Namespace) -> list[PlayerMaster]:
     out = players
 
+    if args.player_uid:
+        wanted_uid = set(args.player_uid)
+        out = [player for player in out if player.player_uid in wanted_uid]
+
     if args.player_id:
-        wanted = set(args.player_id)
-        out = [player for player in out if player.kb_player_id in wanted]
+        wanted_kb = set(args.player_id)
+        out = [
+            player for player in out if player.kb_player_id is not None and player.kb_player_id in wanted_kb
+        ]
 
     if args.player_name_like:
         needle = args.player_name_like.strip().lower()
-        out = [player for player in out if needle in player.name.lower()]
+        out = [player for player in out if needle in player.player_name.lower()]
 
-    out = sorted(out, key=lambda player: (player.name.lower(), player.kb_player_id))
+    out = sorted(out, key=lambda player: (player.player_name.lower(), player.player_uid))
 
     if args.max_players is not None and args.max_players > 0:
         out = out[: args.max_players]
@@ -251,6 +317,7 @@ def load_latest_ligainsider_name_map(input_dir: Path) -> dict[str, dict[str, Any
     latest = max(files, key=lambda path: path.name)
     mapping: dict[str, dict[str, Any]] = {}
     collisions: set[str] = set()
+
     with latest.open("r", encoding="utf-8") as handle:
         for line in handle:
             raw = line.strip()
@@ -262,14 +329,15 @@ def load_latest_ligainsider_name_map(input_dir: Path) -> dict[str, dict[str, Any
                 continue
             if not isinstance(row, dict):
                 continue
+
             name = _to_text(_first_present(row, ["player_name", "name"]))
             if not name:
                 continue
             key = _normalize_name(name)
             if not key:
                 continue
-            existing = mapping.get(key)
-            if existing is not None:
+
+            if key in mapping:
                 collisions.add(key)
                 continue
             mapping[key] = row
@@ -279,13 +347,14 @@ def load_latest_ligainsider_name_map(input_dir: Path) -> dict[str, dict[str, Any
 
     if collisions:
         LOGGER.warning(
-            "LigaInsider Name-Kollisionen im Snapshot erkannt: %s Namen werden fuer Birthdate-Mapping ignoriert.",
+            "LigaInsider Name-Kollisionen im Snapshot erkannt: %s Namen werden ignoriert.",
             len(collisions),
         )
+
     return mapping
 
 
-def resolve_player_identity(
+def resolve_player_enrichment(
     *,
     player: PlayerMaster,
     existing_identity: Any,
@@ -294,35 +363,35 @@ def resolve_player_identity(
     ligainsider_session: requests.Session,
     ligainsider_timeout_seconds: float,
 ) -> dict[str, Any]:
-    birth_date = player.birth_date
+    birthdate = player.birthdate
+    image_url = player.image_url
     ligainsider_slug = player.ligainsider_player_slug
     ligainsider_player_id = player.ligainsider_player_id
-    player_image_url = player.player_image_url
 
-    if existing_identity is not None:
-        if birth_date is None:
-            birth_date = existing_identity.birth_date
-        if not ligainsider_slug:
-            ligainsider_slug = existing_identity.ligainsider_player_slug
-        if ligainsider_player_id is None:
-            ligainsider_player_id = existing_identity.ligainsider_player_id
-        if not player_image_url:
-            player_image_url = existing_identity.player_image_url
+    if existing_identity is not None and birthdate is None:
+        birthdate = existing_identity.birthdate
 
     if not ligainsider_slug:
-        li_row = ligainsider_name_map.get(_normalize_name(player.name))
+        li_row = ligainsider_name_map.get(_normalize_name(player.player_name))
         if li_row is not None:
             ligainsider_slug = _to_text_or_none(li_row.get("ligainsider_player_slug"))
             ligainsider_player_id = _to_int(li_row.get("ligainsider_player_id"))
-            if not player_image_url:
-                player_image_url = _to_text_or_none(
-                    _first_present(
-                        li_row,
-                        ["player_image_url", "image_url", "photo_url", "player_image"],
+            if image_url is None:
+                image_url = _normalize_image_url(
+                    _to_text_or_none(
+                        _first_present(
+                            li_row,
+                            [
+                                "player_image_url",
+                                "image_url",
+                                "player_image",
+                                "photo_url",
+                            ],
+                        )
                     )
                 )
 
-    if ligainsider_slug and (birth_date is None or not player_image_url):
+    if ligainsider_slug and (birthdate is None or image_url is None):
         profile = ligainsider_profile_cache.get(ligainsider_slug)
         if profile is None:
             profile = fetch_ligainsider_profile(
@@ -332,22 +401,17 @@ def resolve_player_identity(
                 timeout_seconds=ligainsider_timeout_seconds,
             )
             ligainsider_profile_cache[ligainsider_slug] = profile
-        if birth_date is None:
-            birth_date = _parse_date(profile.get("birth_date"))
-        if not player_image_url:
-            player_image_url = _to_text_or_none(profile.get("player_image_url"))
 
-    if existing_identity is not None and birth_date is None:
-        player_uid = existing_identity.player_uid
-    else:
-        player_uid = build_player_uid(player.name, birth_date)
+        if birthdate is None:
+            birthdate = _parse_date(profile.get("birthdate"))
+        if image_url is None:
+            image_url = _normalize_image_url(_to_text_or_none(profile.get("image_url")))
 
     return {
-        "player_uid": player_uid,
-        "birth_date": birth_date,
+        "birthdate": birthdate,
+        "image_url": image_url,
         "ligainsider_player_slug": ligainsider_slug,
         "ligainsider_player_id": ligainsider_player_id,
-        "player_image_url": player_image_url,
     }
 
 
@@ -368,18 +432,28 @@ def fetch_ligainsider_profile(
         "User-Agent": os.getenv("LIGAINSIDER_USER_AGENT", "kickbase-analyzer/1.0"),
         "Accept": "text/html,application/xhtml+xml",
     }
+
     for url in url_candidates:
         try:
             response = session.get(url, timeout=timeout_seconds, headers=headers)
         except requests.RequestException:
             continue
+
         if response.status_code >= 400:
             continue
-        birth_date = _extract_birth_date_from_ligainsider_html(response.text)
+
+        birthdate = _extract_birth_date_from_ligainsider_html(response.text)
         image_url = _extract_player_image_from_ligainsider_html(response.text, page_url=url)
-        if birth_date is not None or image_url:
-            return {"birth_date": birth_date, "player_image_url": image_url}
-    return {"birth_date": None, "player_image_url": None}
+        if birthdate is not None or image_url is not None:
+            return {
+                "birthdate": birthdate,
+                "image_url": image_url,
+            }
+
+    return {
+        "birthdate": None,
+        "image_url": None,
+    }
 
 
 def _extract_birth_date_from_ligainsider_html(html_text: str) -> date | None:
@@ -410,6 +484,7 @@ def _extract_player_image_from_ligainsider_html(html_text: str, *, page_url: str
         r'"image"\s*:\s*"(?P<url>https?://[^"]+)"',
         r'"image"\s*:\s*"(?P<url>/[^"]+)"',
     ]
+
     for pattern in patterns:
         match = re.search(pattern, html_text, flags=re.IGNORECASE)
         if match is None:
@@ -417,22 +492,204 @@ def _extract_player_image_from_ligainsider_html(html_text: str, *, page_url: str
         candidate = _to_text_or_none(match.group("url"))
         if not candidate:
             continue
-        return urljoin(page_url, candidate)
+        return _normalize_image_url(urljoin(page_url, candidate))
+
     return None
 
 
-def build_player_uid(name: str, birth_date: date | None) -> str:
-    normalized_name = _normalize_name(name)
-    birth_token = birth_date.strftime("%Y%m%d") if birth_date is not None else "00000000"
-    return f"{normalized_name}_{birth_token}"
+def load_player_image_blob(
+    *,
+    session: requests.Session,
+    player_uid: int,
+    image_url: str | None,
+    existing_sha256: str | None,
+    cache_dir: Path,
+    timeout_seconds: float,
+    max_bytes: int,
+    retries: int,
+    backoff_seconds: float,
+) -> ImageLoadResult:
+    if not image_url:
+        return ImageLoadResult(
+            image_blob=None,
+            image_mime=None,
+            image_sha256=None,
+            status="missing_source",
+        )
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_meta_path = cache_dir / f"{player_uid}.json"
+    cache_blob_path = cache_dir / f"{player_uid}.bin"
+
+    cached = _load_image_from_cache(
+        cache_meta_path=cache_meta_path,
+        cache_blob_path=cache_blob_path,
+        expected_url=image_url,
+    )
+    if cached is not None:
+        image_bytes, image_mime = cached
+        image_sha256 = hashlib.sha256(image_bytes).hexdigest()
+        if existing_sha256 and existing_sha256 == image_sha256:
+            return ImageLoadResult(None, image_mime, image_sha256, "unchanged")
+        return ImageLoadResult(image_bytes, image_mime, image_sha256, "updated_from_cache")
+
+    image_bytes, image_mime, status = _download_image_with_retries(
+        session=session,
+        url=image_url,
+        timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
+        retries=retries,
+        backoff_seconds=backoff_seconds,
+    )
+    if image_bytes is None or image_mime is None:
+        return ImageLoadResult(None, None, None, status)
+
+    image_sha256 = hashlib.sha256(image_bytes).hexdigest()
+    _write_image_cache(
+        cache_meta_path=cache_meta_path,
+        cache_blob_path=cache_blob_path,
+        image_url=image_url,
+        image_mime=image_mime,
+        image_sha256=image_sha256,
+        image_bytes=image_bytes,
+    )
+
+    if existing_sha256 and existing_sha256 == image_sha256:
+        return ImageLoadResult(None, image_mime, image_sha256, "unchanged")
+
+    return ImageLoadResult(image_bytes, image_mime, image_sha256, "updated")
 
 
-def _normalize_name(value: str) -> str:
-    text = unicodedata.normalize("NFKD", value)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = re.sub(r"[^A-Za-z0-9]+", "_", text)
-    text = text.strip("_").lower()
-    return text or "unknown_player"
+def _load_image_from_cache(
+    *,
+    cache_meta_path: Path,
+    cache_blob_path: Path,
+    expected_url: str,
+) -> tuple[bytes, str] | None:
+    if not cache_meta_path.exists() or not cache_blob_path.exists():
+        return None
+
+    try:
+        meta = json.loads(cache_meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if not isinstance(meta, dict):
+        return None
+
+    cached_url = _to_text_or_none(meta.get("image_url"))
+    cached_mime = _to_text_or_none(meta.get("image_mime"))
+    if cached_url != expected_url or cached_mime not in ALLOWED_IMAGE_MIME_TYPES:
+        return None
+
+    try:
+        image_bytes = cache_blob_path.read_bytes()
+    except OSError:
+        return None
+
+    if not image_bytes:
+        return None
+
+    return image_bytes, str(cached_mime)
+
+
+def _write_image_cache(
+    *,
+    cache_meta_path: Path,
+    cache_blob_path: Path,
+    image_url: str,
+    image_mime: str,
+    image_sha256: str,
+    image_bytes: bytes,
+) -> None:
+    cache_blob_path.write_bytes(image_bytes)
+    cache_meta_path.write_text(
+        json.dumps(
+            {
+                "image_url": image_url,
+                "image_mime": image_mime,
+                "image_sha256": image_sha256,
+            },
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _download_image_with_retries(
+    *,
+    session: requests.Session,
+    url: str,
+    timeout_seconds: float,
+    max_bytes: int,
+    retries: int,
+    backoff_seconds: float,
+) -> tuple[bytes | None, str | None, str]:
+    headers = {
+        "User-Agent": os.getenv("KICKBASE_IMAGE_USER_AGENT", "kickbase-analyzer/1.0"),
+        "Accept": "image/png,image/jpeg,image/*;q=0.9,*/*;q=0.2",
+    }
+
+    for attempt in range(retries + 1):
+        try:
+            response = session.get(url, headers=headers, timeout=timeout_seconds, stream=True)
+        except requests.RequestException:
+            if attempt < retries:
+                time.sleep(backoff_seconds * (2**attempt))
+                continue
+            return None, None, "failed_request"
+
+        if response.status_code in RETRYABLE_IMAGE_STATUS_CODES and attempt < retries:
+            time.sleep(backoff_seconds * (2**attempt))
+            continue
+
+        if response.status_code >= 400:
+            return None, None, f"failed_status_{response.status_code}"
+
+        image_mime = _normalize_image_mime(
+            _to_text_or_none(response.headers.get("Content-Type")),
+            url=url,
+        )
+        if image_mime not in ALLOWED_IMAGE_MIME_TYPES:
+            return None, None, "failed_mime"
+
+        content_length = _to_int(response.headers.get("Content-Length"))
+        if content_length is not None and content_length > max_bytes:
+            return None, None, "failed_too_large"
+
+        payload = bytearray()
+        try:
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                payload.extend(chunk)
+                if len(payload) > max_bytes:
+                    return None, None, "failed_too_large"
+        finally:
+            response.close()
+
+        if not payload:
+            return None, None, "failed_empty"
+
+        return bytes(payload), image_mime, "downloaded"
+
+    return None, None, "failed_unknown"
+
+
+def _normalize_image_mime(content_type: str | None, *, url: str) -> str | None:
+    if content_type:
+        normalized = content_type.split(";", 1)[0].strip().lower()
+        if normalized in ALLOWED_IMAGE_MIME_TYPES:
+            return normalized
+
+    lower_url = url.lower()
+    if lower_url.endswith(".jpg") or lower_url.endswith(".jpeg"):
+        return "image/jpeg"
+    if lower_url.endswith(".png"):
+        return "image/png"
+    return None
 
 
 def build_match_lookup(payload: dict[str, Any] | list[Any]) -> dict[tuple[int, int, int], dict[str, Any]]:
@@ -471,53 +728,6 @@ def build_team_symbol_lookup(payload: dict[str, Any] | list[Any]) -> dict[int, s
             if t2 is not None and t2_symbol is not None:
                 team_code_by_team_id[t2] = t2_symbol
     return team_code_by_team_id
-
-
-def _resolve_team_code(
-    *,
-    team_id: int | None,
-    inline_symbol: str | None,
-    team_code_by_team_id: dict[int, str] | None,
-) -> str | None:
-    if inline_symbol:
-        return _normalize_team_code(inline_symbol)
-    if team_id is not None and team_code_by_team_id is not None:
-        mapped = team_code_by_team_id.get(team_id)
-        if mapped:
-            return _normalize_team_code(mapped)
-    if team_id is not None:
-        return f"T{team_id}"
-    return None
-
-
-def _normalize_team_code(value: str | None) -> str | None:
-    if not value:
-        return None
-    normalized = re.sub(r"[^A-Za-z0-9]+", "", value).upper()
-    return normalized or None
-
-
-def _season_token(season_label: str) -> str:
-    match = re.match(r"^\s*(\d{4})\s*/\s*(\d{4})\s*$", season_label)
-    if match is None:
-        return season_label or "unknown"
-    left = match.group(1)[2:]
-    right = match.group(2)[2:]
-    return f"{left}/{right}"
-
-
-def format_team_name(team_code: str | None, team_name: str | None) -> str | None:
-    if not team_name and team_code:
-        team_name = DEFAULT_TEAM_NAME_BY_CODE.get(team_code)
-    if team_code and team_name:
-        if re.match(r"^[A-Z0-9]{2,5}\s+\(.+\)$", team_name):
-            return team_name
-        return f"{team_code} ({team_name})"
-    if team_code:
-        return team_code
-    if team_name:
-        return team_name
-    return None
 
 
 def extract_rows(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
@@ -572,16 +782,14 @@ def parse_event_types(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any
 
     direct_rows = extract_rows(payload)
     for row in direct_rows:
-        event_type_id = _to_int(
-            _first_present(row, ["eti", "eventTypeId", "event_type_id", "id", "i"])
-        )
+        event_type_id = _to_int(_first_present(row, ["eti", "eventTypeId", "event_type_id", "id", "i"]))
         if event_type_id is None:
             continue
         rows.append(
             {
                 "event_type_id": event_type_id,
-                "name": _to_text(_first_present(row, ["name", "n", "title", "ti"]))
-                or f"eti_{event_type_id}",
+                "event_name": _to_text(_first_present(row, ["name", "n", "title", "ti"]))
+                or f"event_{event_type_id}",
                 "template": _to_text_or_none(_first_present(row, ["template", "tpl", "att", "te"])),
             }
         )
@@ -595,16 +803,14 @@ def parse_event_types(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any
             if event_type_id is None:
                 continue
             if isinstance(value, str):
-                rows.append({"event_type_id": event_type_id, "name": value, "template": None})
+                rows.append({"event_type_id": event_type_id, "event_name": value, "template": None})
             elif isinstance(value, dict):
                 rows.append(
                     {
                         "event_type_id": event_type_id,
-                        "name": _to_text(_first_present(value, ["name", "n", "title", "ti"]))
-                        or f"eti_{event_type_id}",
-                        "template": _to_text_or_none(
-                            _first_present(value, ["template", "tpl", "att", "te"])
-                        ),
+                        "event_name": _to_text(_first_present(value, ["name", "n", "title", "ti"]))
+                        or f"event_{event_type_id}",
+                        "template": _to_text_or_none(_first_present(value, ["template", "tpl", "att", "te"])),
                     }
                 )
 
@@ -614,8 +820,7 @@ def parse_event_types(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any
 def parse_market_value_history(
     payload: dict[str, Any] | list[Any],
     *,
-    player_uid: str,
-    kb_player_id: int,
+    player_uid: int,
 ) -> list[dict[str, Any]]:
     rows = extract_rows(payload)
     out: list[dict[str, Any]] = []
@@ -632,7 +837,6 @@ def parse_market_value_history(
         out.append(
             {
                 "player_uid": player_uid,
-                "kb_player_id": kb_player_id,
                 "mv_date": dt.date(),
                 "market_value": market_value,
                 "source_dt_days": _to_int(row.get("dt")) if isinstance(row, dict) else None,
@@ -640,7 +844,6 @@ def parse_market_value_history(
         )
 
     out.sort(key=lambda item: item["mv_date"])
-
     dedup: dict[date, dict[str, Any]] = {}
     for row in out:
         dedup[row["mv_date"]] = row
@@ -650,9 +853,7 @@ def parse_market_value_history(
 def parse_performance_rows(
     payload: dict[str, Any] | list[Any],
     *,
-    player_uid: str,
-    kb_player_id: int,
-    competition_id: int,
+    player_uid: int,
     active_season_label: str,
     match_lookup: dict[tuple[int, int, int], dict[str, Any]] | None = None,
     team_code_by_team_id: dict[int, str] | None = None,
@@ -667,27 +868,19 @@ def parse_performance_rows(
         if matchday is None or points_total is None:
             continue
 
+        kickoff_ts = _parse_datetime(_first_present(row, ["kickoff", "md", "match_ts", "d", "date", "ts"]))
         score_home = _to_int(_first_present(row, ["scoreHome", "score_home", "sh", "t1g"]))
         score_away = _to_int(_first_present(row, ["scoreAway", "score_away", "sa", "t2g"]))
 
         if score_home is None or score_away is None:
             score_text = _to_text(_first_present(row, ["score", "result", "res"]))
-            parsed = _parse_score(score_text)
-            if parsed is not None:
-                score_home, score_away = parsed
+            parsed_score = _parse_score(score_text)
+            if parsed_score is not None:
+                score_home, score_away = parsed_score
 
-        team_id = _to_int(_first_present(row, ["team_id", "tid", "t", "pt"]))
+        team_id = _to_int(_first_present(row, ["team_id", "kickbase_team_id", "tid", "t", "pt"]))
         t1 = _to_int(_first_present(row, ["t1", "team_home_id"]))
         t2 = _to_int(_first_present(row, ["t2", "team_away_id"]))
-        opponent_team_id = _to_int(
-            _first_present(row, ["opponent_team_id", "opp_tid", "otid", "opponentTeamId"])
-        )
-        if opponent_team_id is None and team_id is not None:
-            if t1 is not None and t2 is not None:
-                if t1 == team_id:
-                    opponent_team_id = t2
-                elif t2 == team_id:
-                    opponent_team_id = t1
 
         if (
             match_lookup is not None
@@ -702,24 +895,12 @@ def parse_performance_rows(
             if isinstance(lookup_match, dict):
                 if row.get("match_id") is None:
                     row["match_id"] = _to_int(lookup_match.get("mi"))
-
-        is_home: bool | None = None
-        if team_id is not None and t1 is not None and t2 is not None:
-            if team_id == t1:
-                is_home = True
-            elif team_id == t2:
-                is_home = False
-
-        match_result: str | None = None
-        if score_home is not None and score_away is not None and is_home is not None:
-            own_score = score_home if is_home else score_away
-            opp_score = score_away if is_home else score_home
-            if own_score > opp_score:
-                match_result = "W"
-            elif own_score < opp_score:
-                match_result = "L"
-            else:
-                match_result = "D"
+                if kickoff_ts is None:
+                    kickoff_ts = _parse_datetime(lookup_match.get("dt"))
+                if score_home is None:
+                    score_home = _to_int(lookup_match.get("t1g"))
+                if score_away is None:
+                    score_away = _to_int(lookup_match.get("t2g"))
 
         t1_code = _resolve_team_code(
             team_id=t1,
@@ -739,17 +920,47 @@ def parse_performance_rows(
             t2_code=t2_code,
         )
 
+        opponent_team_id = _to_int(
+            _first_present(row, ["opponent_team_id", "opp_tid", "otid", "opponentTeamId"])
+        )
+        if opponent_team_id is None and team_id is not None and t1 is not None and t2 is not None:
+            if team_id == t1:
+                opponent_team_id = t2
+            elif team_id == t2:
+                opponent_team_id = t1
+
+        is_home: bool | None = None
+        if team_id is not None and t1 is not None and t2 is not None:
+            if team_id == t1:
+                is_home = True
+            elif team_id == t2:
+                is_home = False
+
+        match_result: str | None = None
+        if score_home is not None and score_away is not None and is_home is not None:
+            own_score = score_home if is_home else score_away
+            opp_score = score_away if is_home else score_home
+            if own_score > opp_score:
+                match_result = "W"
+            elif own_score < opp_score:
+                match_result = "L"
+            else:
+                match_result = "D"
+
         out.append(
             {
                 "player_uid": player_uid,
-                "kb_player_id": kb_player_id,
-                "competition_id": competition_id,
                 "season_label": season_label_safe,
                 "matchday": matchday,
                 "match_uid": match_uid,
-                "match_id": _to_int(_first_present(row, ["match_id", "matchId", "mid", "m" ])),
+                "kickbase_match_id": _to_int(_first_present(row, ["match_id", "matchId", "mid", "m"])),
+                "kickoff_ts": kickoff_ts,
                 "team_id": team_id,
                 "opponent_team_id": opponent_team_id,
+                "t1_id": t1,
+                "t2_id": t2,
+                "t1_code": t1_code,
+                "t2_code": t2_code,
                 "is_home": is_home,
                 "score_home": score_home,
                 "score_away": score_away,
@@ -797,18 +1008,17 @@ def _extract_performance_entries(payload: dict[str, Any] | list[Any]) -> list[tu
 def parse_playercenter_events(
     payload: dict[str, Any] | list[Any],
     *,
-    player_uid: str,
-    kb_player_id: int,
-    competition_id: int,
-    season_label: str,
-    matchday: int,
+    player_uid: int,
     match_uid: str | None,
     event_type_name_map: dict[int, str],
 ) -> list[dict[str, Any]]:
+    if not match_uid:
+        return []
+
     event_dicts = _find_event_dicts(payload)
     rows: list[dict[str, Any]] = []
 
-    for event in event_dicts:
+    for index, event in enumerate(event_dicts):
         event_type_id = _to_int(_first_present(event, ["eti", "eventTypeId", "event_type_id", "id"]))
         points = _to_int(_first_present(event, ["p", "points", "pts", "value"]))
         if event_type_id is None or points is None:
@@ -816,38 +1026,36 @@ def parse_playercenter_events(
 
         mt = _to_int(_first_present(event, ["mt", "minute", "min"]))
         att = _to_text_or_none(_first_present(event, ["att", "text", "label", "template"]))
-        dedup_key = _build_event_dedup_key(
-            kb_player_id=kb_player_id,
-            competition_id=competition_id,
-            season_label=season_label,
-            matchday=matchday,
+        source_event_id = _to_text_or_none(_first_present(event, ["ei", "event_id", "id"]))
+
+        event_hash = _build_event_hash(
+            player_uid=player_uid,
+            match_uid=match_uid,
             event_type_id=event_type_id,
             points=points,
             mt=mt,
             att=att,
+            source_event_id=source_event_id,
+            event_index=index,
         )
 
         rows.append(
             {
+                "event_hash": event_hash,
                 "player_uid": player_uid,
-                "kb_player_id": kb_player_id,
-                "competition_id": competition_id,
-                "season_label": season_label,
-                "matchday": matchday,
                 "match_uid": match_uid,
                 "event_type_id": event_type_id,
                 "event_name": event_type_name_map.get(event_type_id, f"event_{event_type_id}"),
                 "points": points,
                 "mt": mt,
                 "att": att,
-                "event_dedup_key": dedup_key,
                 "raw_event": event,
             }
         )
 
     unique: dict[str, dict[str, Any]] = {}
     for row in rows:
-        unique[row["event_dedup_key"]] = row
+        unique[row["event_hash"]] = row
     return list(unique.values())
 
 
@@ -870,30 +1078,63 @@ def _find_event_dicts(payload: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _build_event_dedup_key(
+def _build_event_hash(
     *,
-    kb_player_id: int,
-    competition_id: int,
-    season_label: str,
-    matchday: int,
+    player_uid: int,
+    match_uid: str,
     event_type_id: int,
     points: int,
     mt: int | None,
     att: str | None,
+    source_event_id: str | None,
+    event_index: int,
 ) -> str:
     raw = "|".join(
         [
-            str(kb_player_id),
-            str(competition_id),
-            str(season_label),
-            str(matchday),
+            str(player_uid),
+            match_uid,
             str(event_type_id),
             str(points),
             "" if mt is None else str(mt),
             "" if att is None else att,
+            "" if source_event_id is None else source_event_id,
+            str(event_index),
         ]
     )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _resolve_team_code(
+    *,
+    team_id: int | None,
+    inline_symbol: str | None,
+    team_code_by_team_id: dict[int, str] | None,
+) -> str | None:
+    if inline_symbol:
+        return _normalize_team_code(inline_symbol)
+    if team_id is not None and team_code_by_team_id is not None:
+        mapped = team_code_by_team_id.get(team_id)
+        if mapped:
+            return _normalize_team_code(mapped)
+    if team_id is not None:
+        return f"T{team_id}"
+    return None
+
+
+def _normalize_team_code(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = re.sub(r"[^A-Za-z0-9]+", "", value).upper()
+    return normalized or None
+
+
+def _season_token(season_label: str) -> str:
+    match = re.match(r"^\s*(\d{4})\s*/\s*(\d{4})\s*$", season_label)
+    if match is None:
+        return season_label or "unknown"
+    left = match.group(1)[2:]
+    right = match.group(2)[2:]
+    return f"{left}/{right}"
 
 
 def _build_match_uid(
@@ -906,8 +1147,34 @@ def _build_match_uid(
     season = _season_token(season_label or "unknown")
     left = _normalize_team_code(t1_code) or "TNA"
     right = _normalize_team_code(t2_code) or "TNA"
-    matchup = "".join(sorted([left, right]))
+    matchup = f"{left}{right}"
     return f"{season}-MD{int(matchday):02d}-{matchup}"
+
+
+def _normalize_name(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^A-Za-z0-9]+", "_", text)
+    text = text.strip("_").lower()
+    return text or "unknown_player"
+
+
+def _normalize_image_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    if text.startswith("http://") or text.startswith("https://"):
+        return text
+
+    if text.startswith("//"):
+        return f"https:{text}"
+
+    base_url = os.getenv("KICKBASE_CONTENT_BASE_URL", "https://api.kickbase.com/").rstrip("/") + "/"
+    return urljoin(base_url, text.lstrip("/"))
 
 
 def _parse_score(text: str) -> tuple[int, int] | None:
@@ -930,7 +1197,6 @@ def _parse_datetime(value: Any) -> datetime | None:
 
     if isinstance(value, (int, float)):
         ts = float(value)
-        # Kickbase `dt` in Market-Value-History ist Tage-seit-Epoch (z.B. 20505).
         if 10_000 <= ts <= 100_000:
             return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(days=ts)
         if ts > 10_000_000_000:
@@ -1031,6 +1297,92 @@ def _write_json(path: Path, payload: Any) -> None:
         json.dump(payload, handle, ensure_ascii=True, indent=2)
 
 
+def _collect_team_rows(
+    *,
+    player: PlayerMaster,
+    perf_rows: list[dict[str, Any]],
+    team_code_by_team_id: dict[int, str],
+) -> list[dict[str, Any]]:
+    rows_by_key: dict[tuple[int | None, str | None], dict[str, Any]] = {}
+
+    def _add(kickbase_team_id: int | None, team_code: str | None, team_name: str | None) -> None:
+        normalized_code = _normalize_team_code(team_code)
+        if kickbase_team_id is None and normalized_code is None:
+            return
+        display_name = _format_team_display_name(
+            team_code=normalized_code,
+            team_name=team_name,
+            fallback_name=DEFAULT_TEAM_FULL_NAME_BY_CODE.get(normalized_code) if normalized_code else None,
+        )
+        rows_by_key[(kickbase_team_id, normalized_code)] = {
+            "kickbase_team_id": kickbase_team_id,
+            "team_code": normalized_code,
+            "team_name": display_name,
+        }
+
+    _add(player.kickbase_team_id, player.team_code, player.team_name)
+
+    for team_id, code in team_code_by_team_id.items():
+        _add(team_id, code, DEFAULT_TEAM_FULL_NAME_BY_CODE.get(code))
+
+    for perf in perf_rows:
+        is_home = perf.get("is_home")
+        team_id = _to_int(perf.get("team_id"))
+        opponent_team_id = _to_int(perf.get("opponent_team_id"))
+        t1_code = _to_text_or_none(perf.get("t1_code"))
+        t2_code = _to_text_or_none(perf.get("t2_code"))
+
+        if is_home is True:
+            _add(team_id, t1_code, None)
+            _add(opponent_team_id, t2_code, None)
+        elif is_home is False:
+            _add(team_id, t2_code, None)
+            _add(opponent_team_id, t1_code, None)
+
+        _add(_to_int(perf.get("t1_id")), _to_text_or_none(perf.get("t1_code")), None)
+        _add(_to_int(perf.get("t2_id")), _to_text_or_none(perf.get("t2_code")), None)
+
+    return list(rows_by_key.values())
+
+
+def _resolve_team_uid(
+    *,
+    kickbase_team_id: int | None,
+    team_code: str | None,
+    team_lookup: Any,
+) -> int | None:
+    if kickbase_team_id is not None:
+        mapped = team_lookup.by_kickbase_team_id.get(kickbase_team_id)
+        if mapped is not None:
+            return mapped
+
+    normalized = _normalize_team_code(team_code)
+    if normalized is not None:
+        mapped = team_lookup.by_team_code.get(normalized)
+        if mapped is not None:
+            return mapped
+
+    return None
+
+
+def _format_team_display_name(
+    *,
+    team_code: str | None,
+    team_name: str | None,
+    fallback_name: str | None,
+) -> str | None:
+    code = _normalize_team_code(team_code)
+    name = _to_text_or_none(team_name) or _to_text_or_none(fallback_name)
+
+    if code and name:
+        if re.match(r"^[A-Z0-9]{2,5}\s+\(.+\)$", name):
+            return name
+        return f"{code} ({name})"
+    if code:
+        return code
+    return name
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     load_dotenv(args.env_file)
@@ -1039,16 +1391,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from src.db import (
             DbConfig,
-            cleanup_unknown_event_rows_for_player,
+            ensure_season,
+            export_player_images,
+            export_raw_tables_to_csv,
             get_connection,
-            get_existing_player_identity_by_kb_player_id,
+            get_existing_player_identity,
             get_max_market_value_date,
+            insert_fact_player_events,
             set_state,
-            upsert_event_types,
+            upsert_bridge_player_team,
+            upsert_dim_event_types,
+            upsert_dim_matches,
+            upsert_dim_players,
+            upsert_dim_teams,
+            upsert_fact_player_match,
             upsert_market_values,
-            upsert_match_performance,
-            upsert_players,
-            insert_match_events,
         )
     except ModuleNotFoundError as exc:
         raise RuntimeError(
@@ -1059,31 +1416,46 @@ def main(argv: list[str] | None = None) -> int:
 
     players = load_players(args)
     players = select_players(players, args)
+
     ligainsider_name_map = load_latest_ligainsider_name_map(Path("data/bronze"))
     ligainsider_profile_cache: dict[str, dict[str, Any]] = {}
     ligainsider_session = requests.Session()
     ligainsider_timeout_seconds = float(os.getenv("LIGAINSIDER_TIMEOUT_SECONDS", "15"))
+
+    image_session = requests.Session()
+    image_cache_dir = Path(args.image_cache_dir)
 
     kb_config = KickbaseApiConfig.from_env(rps=args.rps)
     if not kb_config.email or not kb_config.password:
         raise RuntimeError("KICKBASE_EMAIL/KICKBASE_PASSWORD sind nicht gesetzt")
 
     db_config = DbConfig.from_env()
-
     raw_root = Path(args.raw_dir)
 
     summary: dict[str, Any] = {
         "players_processed": 0,
-        "marketvalue_inserted": 0,
-        "marketvalue_updated": 0,
-        "performance_inserted": 0,
-        "performance_updated": 0,
-        "match_events_inserted": 0,
-        "match_events_unknown_cleanup_deleted": 0,
         "event_types_inserted": 0,
         "event_types_updated": 0,
+        "teams_inserted": 0,
+        "teams_updated": 0,
+        "matches_inserted": 0,
+        "matches_updated": 0,
+        "bridge_inserted": 0,
+        "bridge_updated": 0,
+        "marketvalue_inserted": 0,
+        "marketvalue_updated": 0,
+        "player_match_inserted": 0,
+        "player_match_updated": 0,
+        "player_event_inserted": 0,
+        "images_updated": 0,
+        "images_unchanged": 0,
+        "images_missing": 0,
+        "images_failed": 0,
         "earliest_marketvalue_date": None,
         "latest_marketvalue_date": None,
+        "csv_exports": [],
+        "image_exports": [],
+        "image_mapping_csv": None,
     }
 
     client = KickbaseClient(kb_config)
@@ -1091,9 +1463,11 @@ def main(argv: list[str] | None = None) -> int:
 
     competition_id = args.competition_id
     if competition_id is None:
-        explicit = sorted({player.competition_id for player in players if player.competition_id is not None})
-        if len(explicit) == 1:
-            competition_id = explicit[0]
+        explicit_competitions = sorted(
+            {player.competition_id for player in players if player.competition_id is not None}
+        )
+        if len(explicit_competitions) == 1:
+            competition_id = explicit_competitions[0]
 
     if competition_id is None:
         competition_id = client.discover_competition_id(
@@ -1103,9 +1477,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if competition_id is None:
-        raise RuntimeError(
-            "Competition ID konnte nicht ermittelt werden. Bitte --competition-id explizit setzen."
-        )
+        raise RuntimeError("Competition ID konnte nicht ermittelt werden. Bitte --competition-id setzen.")
 
     matchdays_payload = client.get_matchdays(token, competition_id)
     current_day = detect_current_matchday(matchdays_payload)
@@ -1115,43 +1487,55 @@ def main(argv: list[str] | None = None) -> int:
     days_to = args.days_to if args.days_to is not None else current_day
     if days_to < args.days_from:
         raise RuntimeError("--days-to darf nicht kleiner als --days-from sein")
-    season_label = args.season_label or detect_season_label(matchdays_payload) or default_season_label()
-    if str(season_label).strip().lower() in {"", "unknown"}:
-        season_label = default_season_label()
+
+    active_season_label = args.season_label or detect_season_label(matchdays_payload) or default_season_label()
+    if str(active_season_label).strip().lower() in {"", "unknown"}:
+        active_season_label = default_season_label()
+
+    league_key = args.league_key.strip() or "bundesliga_1"
+
     match_lookup = build_match_lookup(matchdays_payload)
     team_code_by_team_id = build_team_symbol_lookup(matchdays_payload)
 
     event_types_payload = client.get_event_types(token)
     event_types = parse_event_types(event_types_payload)
     event_type_name_map = {
-        int(row["event_type_id"]): str(row["name"])
+        int(row["event_type_id"]): str(row["event_name"])
         for row in event_types
         if row.get("event_type_id") is not None
     }
 
     with get_connection(db_config) as conn:
-        inserted, updated = upsert_event_types(conn, event_types)
-        summary["event_types_inserted"] += inserted
-        summary["event_types_updated"] += updated
+        inserted_types, updated_types = upsert_dim_event_types(conn, event_types)
+        summary["event_types_inserted"] += inserted_types
+        summary["event_types_updated"] += updated_types
+
+        active_season_uid = ensure_season(conn, league_key=league_key, season_label=active_season_label)
         set_state(conn, "last_eventtypes_sync_ts", datetime.now(UTC).isoformat().replace("+00:00", "Z"))
         conn.commit()
 
-        for idx, player in enumerate(players, start=1):
+        for index, player in enumerate(players, start=1):
             player_competition_id = player.competition_id or competition_id
             if player_competition_id is None:
-                LOGGER.warning("Skip player %s: no competition id", player.kb_player_id)
+                LOGGER.warning("Skip player %s: no competition id", player.player_uid)
                 continue
 
             LOGGER.info(
-                "[%s/%s] player=%s (%s) competition=%s",
-                idx,
+                "[%s/%s] player=%s (uid=%s, kb=%s) competition=%s",
+                index,
                 len(players),
-                player.name,
+                player.player_name,
+                player.player_uid,
                 player.kb_player_id,
                 player_competition_id,
             )
-            existing_identity = get_existing_player_identity_by_kb_player_id(conn, player.kb_player_id)
-            identity = resolve_player_identity(
+
+            existing_identity = get_existing_player_identity(
+                conn,
+                player_uid=player.player_uid,
+                kb_player_id=player.kb_player_id,
+            )
+            enrichment = resolve_player_enrichment(
                 player=player,
                 existing_identity=existing_identity,
                 ligainsider_name_map=ligainsider_name_map,
@@ -1159,30 +1543,44 @@ def main(argv: list[str] | None = None) -> int:
                 ligainsider_session=ligainsider_session,
                 ligainsider_timeout_seconds=ligainsider_timeout_seconds,
             )
-            player_uid = str(identity["player_uid"])
-            team_code = _resolve_team_code(
-                team_id=player.team_id,
-                inline_symbol=None,
-                team_code_by_team_id=team_code_by_team_id,
-            )
-            team_name = format_team_name(team_code, player.team_name)
 
-            upsert_players(
+            image_result = ImageLoadResult(None, None, None, "missing_source")
+            if args.skip_image_download:
+                image_result = ImageLoadResult(None, None, None, "skipped")
+            else:
+                image_result = load_player_image_blob(
+                    session=image_session,
+                    player_uid=player.player_uid,
+                    image_url=_to_text_or_none(enrichment.get("image_url")),
+                    existing_sha256=existing_identity.image_sha256 if existing_identity else None,
+                    cache_dir=image_cache_dir,
+                    timeout_seconds=args.image_timeout_seconds,
+                    max_bytes=args.image_max_bytes,
+                    retries=args.image_retries,
+                    backoff_seconds=args.image_backoff_seconds,
+                )
+
+            if image_result.status in {"updated", "updated_from_cache"}:
+                summary["images_updated"] += 1
+            elif image_result.status == "unchanged":
+                summary["images_unchanged"] += 1
+            elif image_result.status in {"missing_source", "skipped"}:
+                summary["images_missing"] += 1
+            else:
+                summary["images_failed"] += 1
+
+            upsert_dim_players(
                 conn,
                 [
                     {
-                        "player_uid": player_uid,
+                        "player_uid": player.player_uid,
                         "kb_player_id": player.kb_player_id,
-                        "name": player.name,
-                        "birth_date": identity["birth_date"],
-                        "ligainsider_player_slug": identity["ligainsider_player_slug"],
-                        "ligainsider_player_id": identity["ligainsider_player_id"],
-                        "player_image_url": identity["player_image_url"],
-                        "team_id": player.team_id,
-                        "team_code": team_code,
-                        "team_name": team_name,
+                        "player_name": player.player_name,
                         "position": player.position,
-                        "competition_id": player_competition_id,
+                        "birthdate": enrichment.get("birthdate"),
+                        "image_blob": image_result.image_blob,
+                        "image_mime": image_result.image_mime,
+                        "image_sha256": image_result.image_sha256,
                     }
                 ],
             )
@@ -1190,23 +1588,17 @@ def main(argv: list[str] | None = None) -> int:
             market_payload = client.get_market_value_history(
                 token,
                 player_competition_id,
-                player.kb_player_id,
+                int(player.kb_player_id or player.player_uid),
                 args.timeframe_days,
             )
             if args.save_raw:
                 _write_json(
-                    raw_root
-                    / str(player.kb_player_id)
-                    / f"marketvalue_{player_competition_id}_{args.timeframe_days}.json",
+                    raw_root / str(player.player_uid) / f"marketvalue_{player_competition_id}_{args.timeframe_days}.json",
                     market_payload,
                 )
 
-            market_rows = parse_market_value_history(
-                market_payload,
-                player_uid=player_uid,
-                kb_player_id=player.kb_player_id,
-            )
-            max_existing_date = get_max_market_value_date(conn, player_uid)
+            market_rows = parse_market_value_history(market_payload, player_uid=player.player_uid)
+            max_existing_date = get_max_market_value_date(conn, player.player_uid)
             if max_existing_date is not None:
                 market_rows = [row for row in market_rows if row["mv_date"] > max_existing_date]
 
@@ -1226,59 +1618,145 @@ def main(argv: list[str] | None = None) -> int:
             performance_payload = client.get_performance(
                 token,
                 player_competition_id,
-                player.kb_player_id,
+                int(player.kb_player_id or player.player_uid),
             )
             if args.save_raw:
                 _write_json(
-                    raw_root / str(player.kb_player_id) / f"performance_{player_competition_id}.json",
+                    raw_root / str(player.player_uid) / f"performance_{player_competition_id}.json",
                     performance_payload,
                 )
 
             perf_rows = parse_performance_rows(
                 performance_payload,
-                player_uid=player_uid,
-                kb_player_id=player.kb_player_id,
-                competition_id=player_competition_id,
-                active_season_label=season_label,
+                player_uid=player.player_uid,
+                active_season_label=active_season_label,
                 match_lookup=match_lookup,
                 team_code_by_team_id=team_code_by_team_id,
             )
-            inserted_perf, updated_perf = upsert_match_performance(conn, perf_rows)
-            summary["performance_inserted"] += inserted_perf
-            summary["performance_updated"] += updated_perf
 
-            match_uid_by_day = {
-                int(row["matchday"]): str(row["match_uid"])
-                for row in perf_rows
-                if str(row.get("season_label")) == season_label
-            }
+            team_rows = _collect_team_rows(
+                player=player,
+                perf_rows=perf_rows,
+                team_code_by_team_id=team_code_by_team_id,
+            )
+            team_lookup, teams_inserted, teams_updated = upsert_dim_teams(
+                conn,
+                league_key=league_key,
+                rows=team_rows,
+            )
+            summary["teams_inserted"] += teams_inserted
+            summary["teams_updated"] += teams_updated
+
+            player_team_uid = _resolve_team_uid(
+                kickbase_team_id=player.kickbase_team_id,
+                team_code=player.team_code,
+                team_lookup=team_lookup,
+            )
+            if player_team_uid is not None:
+                bridge_inserted, bridge_updated = upsert_bridge_player_team(
+                    conn,
+                    [
+                        {
+                            "player_uid": player.player_uid,
+                            "season_uid": active_season_uid,
+                            "team_uid": player_team_uid,
+                            "source": "kickbase",
+                        }
+                    ],
+                )
+                summary["bridge_inserted"] += bridge_inserted
+                summary["bridge_updated"] += bridge_updated
+
+            season_uid_cache: dict[str, int] = {active_season_label: active_season_uid}
+            dim_match_rows: list[dict[str, Any]] = []
+            fact_match_rows: list[dict[str, Any]] = []
+            match_uid_by_day: dict[int, str] = {}
+
+            for perf_row in perf_rows:
+                perf_season_label = str(perf_row["season_label"])
+                if perf_season_label not in season_uid_cache and perf_season_label.lower() != "unknown":
+                    season_uid_cache[perf_season_label] = ensure_season(
+                        conn,
+                        league_key=league_key,
+                        season_label=perf_season_label,
+                    )
+
+                t1_team_uid = _resolve_team_uid(
+                    kickbase_team_id=_to_int(perf_row.get("t1_id")),
+                    team_code=_to_text_or_none(perf_row.get("t1_code")),
+                    team_lookup=team_lookup,
+                )
+                t2_team_uid = _resolve_team_uid(
+                    kickbase_team_id=_to_int(perf_row.get("t2_id")),
+                    team_code=_to_text_or_none(perf_row.get("t2_code")),
+                    team_lookup=team_lookup,
+                )
+
+                match_uid = str(perf_row["match_uid"])
+                matchday = int(perf_row["matchday"])
+                if perf_season_label == active_season_label:
+                    match_uid_by_day[matchday] = match_uid
+
+                dim_match_rows.append(
+                    {
+                        "match_uid": match_uid,
+                        "kickbase_match_id": _to_int(perf_row.get("kickbase_match_id")),
+                        "league_key": league_key,
+                        "season_uid": season_uid_cache.get(perf_season_label),
+                        "season_label": perf_season_label,
+                        "matchday": matchday,
+                        "home_team_uid": t1_team_uid,
+                        "away_team_uid": t2_team_uid,
+                        "kickoff_ts": perf_row.get("kickoff_ts"),
+                        "score_home": _to_int(perf_row.get("score_home")),
+                        "score_away": _to_int(perf_row.get("score_away")),
+                    }
+                )
+
+                fact_match_rows.append(
+                    {
+                        "player_uid": player.player_uid,
+                        "match_uid": match_uid,
+                        "points_total": int(perf_row["points_total"]),
+                        "is_home": perf_row.get("is_home"),
+                        "match_result": _to_text_or_none(perf_row.get("match_result")),
+                        "raw_json": perf_row.get("raw_json"),
+                    }
+                )
+
+            dedup_matches: dict[str, dict[str, Any]] = {}
+            for row in dim_match_rows:
+                dedup_matches[str(row["match_uid"])] = row
+
+            inserted_matches, updated_matches = upsert_dim_matches(conn, list(dedup_matches.values()))
+            summary["matches_inserted"] += inserted_matches
+            summary["matches_updated"] += updated_matches
+
+            inserted_fpm, updated_fpm = upsert_fact_player_match(conn, fact_match_rows)
+            summary["player_match_inserted"] += inserted_fpm
+            summary["player_match_updated"] += updated_fpm
+
             known_event_type_ids = {int(row["event_type_id"]) for row in event_types}
-
             for day_number in range(args.days_from, days_to + 1):
                 playercenter_payload = client.get_playercenter(
                     token,
                     player_competition_id,
-                    player.kb_player_id,
+                    int(player.kb_player_id or player.player_uid),
                     day_number,
                 )
                 if args.save_raw:
                     _write_json(
-                        raw_root
-                        / str(player.kb_player_id)
-                        / f"playercenter_{player_competition_id}_day_{day_number}.json",
+                        raw_root / str(player.player_uid) / f"playercenter_{player_competition_id}_day_{day_number}.json",
                         playercenter_payload,
                     )
 
                 event_rows = parse_playercenter_events(
                     playercenter_payload,
-                    player_uid=player_uid,
-                    kb_player_id=player.kb_player_id,
-                    competition_id=player_competition_id,
-                    season_label=season_label,
-                    matchday=day_number,
+                    player_uid=player.player_uid,
                     match_uid=match_uid_by_day.get(day_number),
                     event_type_name_map=event_type_name_map,
                 )
+
                 if event_rows:
                     missing_event_type_ids = sorted(
                         {int(row["event_type_id"]) for row in event_rows} - known_event_type_ids
@@ -1286,42 +1764,51 @@ def main(argv: list[str] | None = None) -> int:
                     if missing_event_type_ids:
                         dynamic_event_types = [
                             {
-                                "event_type_id": int(event_type_id),
-                                "name": f"event_{event_type_id}",
+                                "event_type_id": event_type_id,
+                                "event_name": f"event_{event_type_id}",
                                 "template": None,
                             }
                             for event_type_id in missing_event_type_ids
                         ]
-                        inserted_dyn, updated_dyn = upsert_event_types(conn, dynamic_event_types)
+                        inserted_dyn, updated_dyn = upsert_dim_event_types(conn, dynamic_event_types)
                         summary["event_types_inserted"] += inserted_dyn
                         summary["event_types_updated"] += updated_dyn
                         known_event_type_ids.update(missing_event_type_ids)
-                        for row in dynamic_event_types:
-                            event_type_name_map[int(row["event_type_id"])] = str(row["name"])
+                        for dynamic in dynamic_event_types:
+                            event_type_name_map[int(dynamic["event_type_id"])] = str(dynamic["event_name"])
 
-                inserted_events = insert_match_events(conn, event_rows)
-                summary["match_events_inserted"] += inserted_events
-            deleted_events = cleanup_unknown_event_rows_for_player(
-                conn,
-                player_uid=player_uid,
-                competition_id=player_competition_id,
-                season_label=season_label,
-            )
-            summary["match_events_unknown_cleanup_deleted"] += deleted_events
+                inserted_events = insert_fact_player_events(conn, event_rows)
+                summary["player_event_inserted"] += inserted_events
 
             set_state(
                 conn,
-                f"last_marketvalue_date_{player_uid}",
+                f"last_marketvalue_date_{player.player_uid}",
                 str(summary["latest_marketvalue_date"] or ""),
             )
             set_state(
                 conn,
-                f"last_matchday_processed_{player_competition_id}_{season_label}_{player_uid}",
+                f"last_matchday_processed_{league_key}_{active_season_label}_{player.player_uid}",
                 str(days_to),
             )
 
             conn.commit()
             summary["players_processed"] += 1
+
+        should_export_tables = bool(args.export_tables)
+        should_export_images = bool(args.export_images)
+        if args.export_dir and not should_export_tables and not should_export_images:
+            should_export_tables = True
+            should_export_images = True
+
+        if args.export_dir:
+            export_root = Path(args.export_dir)
+            if should_export_tables:
+                csv_paths = export_raw_tables_to_csv(conn, export_root / "tables")
+                summary["csv_exports"] = [str(path) for path in csv_paths]
+            if should_export_images:
+                image_paths, mapping_path = export_player_images(conn, export_root / "images")
+                summary["image_exports"] = [str(path) for path in image_paths]
+                summary["image_mapping_csv"] = str(mapping_path)
 
     if isinstance(summary["earliest_marketvalue_date"], date):
         summary["earliest_marketvalue_date"] = summary["earliest_marketvalue_date"].isoformat()

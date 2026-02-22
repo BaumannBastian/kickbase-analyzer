@@ -55,10 +55,10 @@ python -m src.etl_history --env-file .env --players-csv .\in\orban.csv --max-pla
 
 ```powershell
 docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "\dt"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, min(mv_date), max(mv_date), count(*) FROM fact_market_value GROUP BY 1;"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, kb_player_id, team_code, team_name, player_image_url FROM dim_players ORDER BY updated_at DESC LIMIT 20;"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, competition_id, season_label, matchday, match_uid, points_total, is_home, match_result FROM fact_match_performance ORDER BY season_label DESC, matchday DESC LIMIT 20;"
-docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, season_label, matchday, match_uid, event_type_id, event_name, points, mt FROM fact_match_events ORDER BY season_label DESC, matchday DESC, mt ASC NULLS LAST LIMIT 25;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, min(mv_date), max(mv_date), count(*) FROM kickbase_raw.fact_market_value_daily GROUP BY 1;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, kb_player_id, player_name, image_mime, image_sha256 FROM kickbase_raw.dim_player ORDER BY updated_at DESC LIMIT 20;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT player_uid, match_uid, points_total, is_home, match_result FROM kickbase_raw.fact_player_match ORDER BY ingested_at DESC LIMIT 20;"
+docker exec -it kickbase-history-postgres psql -U kickbase -d kickbase_history -c "SELECT e.player_uid, e.match_uid, e.event_type_id, t.event_name, e.points, e.mt FROM kickbase_raw.fact_player_event e LEFT JOIN kickbase_raw.dim_event_type t ON t.event_type_id = e.event_type_id ORDER BY e.ingested_at DESC, e.mt ASC NULLS LAST LIMIT 25;"
 ```
 
 ## 6) Regelmaessiges Update (inkrementell)

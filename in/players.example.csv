@@ -1,2 +1,2 @@
-kb_player_id,name,team_id,team_name,position,competition_id,ligainsider_player_slug,ligainsider_player_id,birth_date
-1704,Waldemar Anton,3,Borussia Dortmund,DEF,1,waldemar-anton,1704,1996-07-20
+player_uid,kb_player_id,player_name,kickbase_team_id,team_code,team_name,position,league_key,competition_id,ligainsider_player_slug,ligainsider_player_id,birthdate,image_url
+1704,1704,Waldemar Anton,3,BVB,Borussia Dortmund,DEF,bundesliga_1,1,waldemar-anton,1704,1996-07-20,
