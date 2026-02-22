@@ -50,6 +50,7 @@ class KickbaseApiConfig:
     performance_path: str
     performance_fallback_paths: tuple[str, ...]
     playercenter_path: str
+    team_profile_path: str
     transfers_path: str
     user_agent: str
     timeout_seconds: float
@@ -106,6 +107,10 @@ class KickbaseApiConfig:
             playercenter_path=os.getenv(
                 "KICKBASE_HISTORY_PLAYERCENTER_PATH",
                 "/v4/competitions/{competition_id}/playercenter/{player_id}",
+            ),
+            team_profile_path=os.getenv(
+                "KICKBASE_TEAM_PROFILE_PATH",
+                "/v4/leagues/{league_id}/teams/{team_id}/teamprofile/",
             ),
             transfers_path=os.getenv(
                 "KICKBASE_HISTORY_TRANSFERS_PATH",
@@ -230,6 +235,23 @@ class KickbaseClient:
 
         return candidates[0] if candidates else None
 
+    def discover_league_id(self) -> int | None:
+        auth_payload = self._last_auth_payload
+        if not isinstance(auth_payload, dict):
+            return None
+
+        leagues = auth_payload.get("srvl")
+        if not isinstance(leagues, list):
+            return None
+
+        for league in leagues:
+            if not isinstance(league, dict):
+                continue
+            candidate = _to_int(league.get("id"))
+            if candidate is not None:
+                return candidate
+        return None
+
     def get_config(self, token: str) -> dict[str, Any]:
         payload = self._request_json("GET", self.config.config_path, token=token)
         return payload if isinstance(payload, dict) else {}
@@ -304,6 +326,15 @@ class KickbaseClient:
             token=token,
             params={"dayNumber": day_number},
         )
+
+    def get_team_profile(
+        self,
+        token: str,
+        league_id: int | str,
+        team_id: int,
+    ) -> dict[str, Any] | list[Any]:
+        path = self.config.team_profile_path.format(league_id=league_id, team_id=team_id)
+        return self._request_json("GET", path, token=token)
 
     def get_player_transfers(
         self,

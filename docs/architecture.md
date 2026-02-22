@@ -334,7 +334,7 @@ kickbase-analyzer/
 
 ### V1.0 (Data Quality + Modeling Upgrade)
 - [x] Kickbase Feldmapping validieren (`smc` vs `ismc`) und `average_minutes` korrekt auf Einsaetzen statt Starts berechnen (inkl. Guard gegen Division durch 0).
-- [ ] Kickbase `team_id` Mapping dokumentieren und in eine Team-Dimension ueberfuehren (`kickbase_team_id` -> club_name, season, canonical_team_uid), damit IDs >18 nachvollziehbar sind.
+- [x] Kickbase `team_id` Mapping in Team-Dimension ueberfuehrt (`kickbase_team_id` -> canonical `team_uid` + Anzeige-Name); historische Legacy-IDs sind nun auf stabile Teamkuerzel normalisiert.
 - [ ] Kickbase-Ingestion-Frequenzen entkoppeln: eigener Mode fuer Marktwert (taeglich 22:04), Performance/Stats (Spieltage) und Status/Lineup (mehrfach taeglich), um API-Calls zu minimieren.
 - [ ] Marktwert-Historie in Bronze vervollstaendigen: 10-Tage-Tuples pro Spieler, `market_value_high_365d`, `market_value_low_365d` aus echter Historie statt Current-Value-Fallback.
 - [ ] Fallback-Strategie fuer Marktwert-Historie implementieren, falls kein dedizierter API-Endpunkt verfuegbar ist (Historisierung aus taeglichen Snapshots).
@@ -368,6 +368,7 @@ kickbase-analyzer/
 - [x] Bild-Persistenz auf lokale Datei-Pfade umgestellt: `dim_player.image_local_path` speichert den lokalen Bildpfad (`data/history/player_images/<player_uid>.jpg`) statt externer URL.
 - [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
 - [x] Team-Schluessel vereinheitlicht: `team_uid` als sprechender Text-Key (primär Teamkuerzel wie `RBL`, `BVB`) statt numerischer Surrogate-Key.
+- [x] Legacy-Teamcodes bereinigt: historische `Txx`-UIDs in `dim_team`/`dim_match`/Facts auf stabile Teamkuerzel migriert; `dim_match.match_uid` fuer Bestandsdaten neu aufgebaut.
 - [x] Identity-Merge eingefuehrt: wenn sich `player_uid` verbessert (z.B. von `...00000000` auf `...YYYYMMDD`), werden bestehende Facts/Bridges konsistent auf den Ziel-Key uebernommen.
 - [x] Identity-Merge gehaertet: Unique-Konflikte auf `kb_player_id` abgefangen und `etl_state`-Keys beim UID-Merge auf den Ziel-Key umgehangen.
 - [x] Inkrementeller Lasttest abgeschlossen: 5-Spieler-Load erfolgreich gegen Postgres (`market_value`, `fact_player_match`, `fact_player_event`, Team/Match-Dims).

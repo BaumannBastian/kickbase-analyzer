@@ -48,23 +48,98 @@ ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png"}
 
 DEFAULT_TEAM_FULL_NAME_BY_CODE = {
     "B04": "Bayer Leverkusen",
+    "BOC": "VfL Bochum",
+    "BSC": "Hertha BSC",
     "BMG": "Bor. M'gladbach",
     "BVB": "Borussia Dortmund",
+    "D98": "SV Darmstadt 98",
+    "DSC": "Arminia Bielefeld",
+    "EBS": "Eintracht Braunschweig",
+    "ELV": "SV Elversberg",
+    "F95": "Fortuna Duesseldorf",
     "FCA": "FC Augsburg",
     "FCB": "FC Bayern",
+    "FCI": "FC Ingolstadt 04",
     "FCH": "1. FC Heidenheim",
+    "FCM": "1. FC Magdeburg",
+    "FCN": "1. FC Nuernberg",
     "FCU": "Union Berlin",
+    "FCK": "1. FC Kaiserslautern",
+    "H96": "Hannover 96",
+    "HEI": "1. FC Heidenheim 1846",
+    "HRO": "Hansa Rostock",
     "HSV": "Hamburger SV",
+    "KIE": "Holstein Kiel",
     "KOE": "1. FC Koeln",
+    "KSC": "Karlsruher SC",
     "M05": "Mainz 05",
+    "MUE": "Preussen Muenster",
+    "OSN": "VfL Osnabrueck",
+    "REG": "SSV Jahn Regensburg",
     "RBL": "RB Leipzig",
+    "S04": "Schalke 04",
+    "SGD": "Dynamo Dresden",
+    "SGF": "SpVgg Greuther Fuerth",
     "SCF": "SC Freiburg",
+    "SCP": "SC Paderborn",
     "SGE": "Eintracht Frankfurt",
+    "SVS": "SV Sandhausen",
     "STP": "FC St. Pauli",
     "SVW": "Werder Bremen",
     "TSG": "TSG Hoffenheim",
+    "ULM": "SSV Ulm 1846",
     "VFB": "VfB Stuttgart",
+    "WIE": "SV Wehen Wiesbaden",
     "WOB": "VfL Wolfsburg",
+    "AUE": "Erzgebirge Aue",
+}
+
+DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID: dict[int, str] = {
+    2: "FCB",
+    3: "BVB",
+    4: "SGE",
+    5: "SCF",
+    6: "HSV",
+    7: "B04",
+    8: "S04",
+    9: "VFB",
+    10: "SVW",
+    11: "WOB",
+    12: "F95",
+    13: "FCA",
+    14: "TSG",
+    15: "BMG",
+    16: "FCN",
+    17: "H96",
+    18: "M05",
+    19: "SGF",
+    20: "BSC",
+    21: "EBS",
+    22: "DSC",
+    23: "HRO",
+    24: "BOC",
+    27: "KSC",
+    28: "KOE",
+    29: "SCP",
+    30: "FCK",
+    32: "AUE",
+    35: "SVS",
+    36: "FCI",
+    39: "STP",
+    40: "FCU",
+    41: "SGD",
+    42: "D98",
+    43: "RBL",
+    47: "REG",
+    48: "FCM",
+    49: "HEI",
+    50: "FCH",
+    51: "KIE",
+    75: "WIE",
+    76: "OSN",
+    77: "ELV",
+    93: "ULM",
+    94: "MUE",
 }
 
 
@@ -894,7 +969,7 @@ def build_match_lookup(payload: dict[str, Any] | list[Any]) -> dict[tuple[int, i
 
 
 def build_team_symbol_lookup(payload: dict[str, Any] | list[Any]) -> dict[int, str]:
-    team_code_by_team_id: dict[int, str] = {}
+    team_code_by_team_id: dict[int, str] = dict(DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID)
     for row in extract_rows(payload):
         matches = row.get("it") if isinstance(row, dict) else None
         if not isinstance(matches, list):
@@ -911,6 +986,68 @@ def build_team_symbol_lookup(payload: dict[str, Any] | list[Any]) -> dict[int, s
             if t2 is not None and t2_symbol is not None:
                 team_code_by_team_id[t2] = t2_symbol
     return team_code_by_team_id
+
+
+def enrich_team_symbols_from_profiles(
+    *,
+    client: Any,
+    token: str,
+    league_id: int | None,
+    team_ids: set[int],
+    team_code_by_team_id: dict[int, str],
+) -> None:
+    if league_id is None:
+        return
+
+    unresolved = sorted(team_id for team_id in team_ids if team_id not in team_code_by_team_id)
+    if not unresolved:
+        return
+
+    for team_id in unresolved:
+        try:
+            payload = client.get_team_profile(token=token, league_id=league_id, team_id=team_id)
+        except Exception as exc:  # pragma: no cover - netzwerkabhaengig
+            LOGGER.debug("Skip teamprofile for team_id=%s: %s", team_id, exc)
+            continue
+
+        team_name = _extract_team_name_from_team_profile(payload)
+        mapped_code = DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID.get(team_id)
+        if mapped_code is None and team_name:
+            mapped_code = _derive_team_code_from_team_name(team_name)
+        if mapped_code is None:
+            mapped_code = f"KB{team_id}"
+
+        normalized_code = _normalize_team_code(mapped_code)
+        if normalized_code is not None:
+            team_code_by_team_id[team_id] = normalized_code
+
+
+def extract_team_ids_from_perf_rows(perf_rows: list[dict[str, Any]]) -> set[int]:
+    team_ids: set[int] = set()
+    for row in perf_rows:
+        for key in ("team_id", "opponent_team_id", "t1_id", "t2_id"):
+            value = _to_int(row.get(key))
+            if value is not None:
+                team_ids.add(value)
+    return team_ids
+
+
+def _extract_team_name_from_team_profile(payload: Any) -> str | None:
+    if isinstance(payload, dict):
+        for key in ("tn", "name", "na", "n", "team_name", "teamName"):
+            candidate = _to_text_or_none(payload.get(key))
+            if candidate:
+                return candidate
+    return None
+
+
+def _derive_team_code_from_team_name(team_name: str) -> str | None:
+    normalized = unicodedata.normalize("NFKD", team_name)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = re.sub(r"[^A-Za-z0-9]+", "", normalized).upper()
+    if len(normalized) >= 3:
+        return normalized[:3]
+    return None
 
 
 def extract_rows(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
@@ -1300,7 +1437,9 @@ def _resolve_team_code(
         if mapped:
             return _normalize_team_code(mapped)
     if team_id is not None:
-        return f"T{team_id}"
+        mapped = DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID.get(team_id)
+        if mapped:
+            return _normalize_team_code(mapped)
     return None
 
 
@@ -1536,11 +1675,14 @@ def _collect_team_rows(
     player: PlayerMaster,
     perf_rows: list[dict[str, Any]],
     team_code_by_team_id: dict[int, str],
+    team_name_by_team_id: dict[int, str] | None = None,
 ) -> list[dict[str, Any]]:
     rows_by_key: dict[tuple[int | None, str | None], dict[str, Any]] = {}
 
     def _add(kickbase_team_id: int | None, team_code: str | None, team_name: str | None) -> None:
         normalized_code = _normalize_team_code(team_code)
+        if normalized_code is None and kickbase_team_id is not None:
+            normalized_code = DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID.get(kickbase_team_id)
         if kickbase_team_id is None and normalized_code is None:
             return
         display_name = _format_team_display_name(
@@ -1557,7 +1699,10 @@ def _collect_team_rows(
     _add(player.kickbase_team_id, player.team_code, player.team_name)
 
     for team_id, code in team_code_by_team_id.items():
-        _add(team_id, code, DEFAULT_TEAM_FULL_NAME_BY_CODE.get(code))
+        dynamic_name = None
+        if team_name_by_team_id is not None:
+            dynamic_name = team_name_by_team_id.get(team_id)
+        _add(team_id, code, dynamic_name or DEFAULT_TEAM_FULL_NAME_BY_CODE.get(code))
 
     for perf in perf_rows:
         is_home = perf.get("is_home")
@@ -1567,14 +1712,32 @@ def _collect_team_rows(
         t2_code = _to_text_or_none(perf.get("t2_code"))
 
         if is_home is True:
-            _add(team_id, t1_code, None)
-            _add(opponent_team_id, t2_code, None)
+            _add(team_id, t1_code, team_name_by_team_id.get(team_id) if team_name_by_team_id else None)
+            _add(
+                opponent_team_id,
+                t2_code,
+                team_name_by_team_id.get(opponent_team_id) if team_name_by_team_id else None,
+            )
         elif is_home is False:
-            _add(team_id, t2_code, None)
-            _add(opponent_team_id, t1_code, None)
+            _add(team_id, t2_code, team_name_by_team_id.get(team_id) if team_name_by_team_id else None)
+            _add(
+                opponent_team_id,
+                t1_code,
+                team_name_by_team_id.get(opponent_team_id) if team_name_by_team_id else None,
+            )
 
-        _add(_to_int(perf.get("t1_id")), _to_text_or_none(perf.get("t1_code")), None)
-        _add(_to_int(perf.get("t2_id")), _to_text_or_none(perf.get("t2_code")), None)
+        t1_id = _to_int(perf.get("t1_id"))
+        t2_id = _to_int(perf.get("t2_id"))
+        _add(
+            t1_id,
+            _to_text_or_none(perf.get("t1_code")),
+            team_name_by_team_id.get(t1_id) if team_name_by_team_id else None,
+        )
+        _add(
+            t2_id,
+            _to_text_or_none(perf.get("t2_code")),
+            team_name_by_team_id.get(t2_id) if team_name_by_team_id else None,
+        )
 
     return list(rows_by_key.values())
 
@@ -1715,6 +1878,10 @@ def main(argv: list[str] | None = None) -> int:
     if competition_id is None:
         raise RuntimeError("Competition ID konnte nicht ermittelt werden. Bitte --competition-id setzen.")
 
+    league_id_value = _to_int(args.league_id)
+    if league_id_value is None:
+        league_id_value = client.discover_league_id()
+
     matchdays_payload = client.get_matchdays(token, competition_id)
     current_day = detect_current_matchday(matchdays_payload)
     if current_day is None:
@@ -1732,6 +1899,11 @@ def main(argv: list[str] | None = None) -> int:
 
     match_lookup = build_match_lookup(matchdays_payload)
     team_code_by_team_id = build_team_symbol_lookup(matchdays_payload)
+    team_name_by_team_id: dict[int, str] = {
+        team_id: DEFAULT_TEAM_FULL_NAME_BY_CODE.get(team_code, team_code)
+        for team_id, team_code in team_code_by_team_id.items()
+        if team_code
+    }
 
     event_types_payload = client.get_event_types(token)
     event_types = parse_event_types(event_types_payload)
@@ -1918,10 +2090,33 @@ def main(argv: list[str] | None = None) -> int:
                 team_code_by_team_id=team_code_by_team_id,
             )
 
+            if perf_rows:
+                candidate_team_ids = extract_team_ids_from_perf_rows(perf_rows)
+                if player.kickbase_team_id is not None:
+                    candidate_team_ids.add(int(player.kickbase_team_id))
+
+                enrich_team_symbols_from_profiles(
+                    client=client,
+                    token=token,
+                    league_id=league_id_value,
+                    team_ids=candidate_team_ids,
+                    team_code_by_team_id=team_code_by_team_id,
+                )
+
+                for team_id in candidate_team_ids:
+                    code = team_code_by_team_id.get(team_id)
+                    if not code:
+                        continue
+                    team_name_by_team_id.setdefault(
+                        team_id,
+                        DEFAULT_TEAM_FULL_NAME_BY_CODE.get(code, code),
+                    )
+
             team_rows = _collect_team_rows(
                 player=player,
                 perf_rows=perf_rows,
                 team_code_by_team_id=team_code_by_team_id,
+                team_name_by_team_id=team_name_by_team_id,
             )
             team_lookup, teams_inserted, teams_updated = upsert_dim_teams(
                 conn,

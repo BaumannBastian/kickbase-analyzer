@@ -170,6 +170,7 @@ Wichtige Felder:
 - `dim_player.image_blob` (`BYTEA`) + `image_mime` + `image_sha256` fuer Spielerbilder
 - `dim_player.image_local_path` fuer den lokalen Datei-Link (`data/history/player_images/<player_uid>.jpg`)
 - `dim_team.team_code` + `dim_team.team_name` im Format `RBL (RB Leipzig)`
+- `dim_team.team_uid` ist auf stabile Teamkuerzel normalisiert (keine Legacy-`Txx` Codes mehr)
 - `fact_market_value_daily.mv_date`, `fact_market_value_daily.market_value`
 - `fact_player_match.match_uid` im kompakten Format `25/26-MD23-RBLBVB`
 - `fact_player_match.is_home` (`true`/`false`) und `fact_player_match.match_result` (`W`/`D`/`L`)

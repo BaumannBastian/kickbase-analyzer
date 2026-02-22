@@ -81,6 +81,50 @@ class HistoryEtlParserTests(unittest.TestCase):
         self.assertFalse(by_day[22]["is_home"])
         self.assertEqual(by_day[22]["match_result"], "W")
 
+    def test_parse_performance_rows_uses_default_team_id_mapping_without_legacy_txx(self) -> None:
+        payload = {
+            "it": [
+                {
+                    "ti": "2025/2026",
+                    "ph": [
+                        {
+                            "day": 9,
+                            "p": 118,
+                            "md": "2026-01-01T14:30:00Z",
+                            "t1": "42",
+                            "t2": "43",
+                            "t1g": 0,
+                            "t2g": 2,
+                            "pt": "43",
+                        },
+                        {
+                            "day": 10,
+                            "p": 110,
+                            "md": "2026-01-08T14:30:00Z",
+                            "t1": "999",
+                            "t2": "43",
+                            "t1g": 1,
+                            "t2g": 1,
+                            "pt": "43",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        rows = parse_performance_rows(
+            payload,
+            player_uid=1246,
+            active_season_label="2025/2026",
+            team_code_by_team_id={},
+        )
+        by_day = {row["matchday"]: row for row in rows}
+
+        self.assertEqual(by_day[9]["match_uid"], "25/26-MD09-D98RBL")
+        self.assertEqual(by_day[10]["match_uid"], "25/26-MD10-TNARBL")
+        self.assertNotIn("T42", by_day[9]["match_uid"])
+        self.assertNotIn("T999", by_day[10]["match_uid"])
+
 
 if __name__ == "__main__":
     unittest.main()

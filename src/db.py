@@ -990,8 +990,8 @@ def _build_team_uid(*, team_code: str | None, kickbase_team_id: int | None) -> s
     if normalized_code:
         return normalized_code.upper()
     if kickbase_team_id is not None:
-        return f"T{kickbase_team_id}"
-    return "TNA"
+        return f"KB{kickbase_team_id}"
+    return "KBNA"
 
 
 def _season_uid_from_label(season_label: str) -> int:
