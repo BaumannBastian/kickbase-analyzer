@@ -366,13 +366,18 @@ kickbase-analyzer/
 - [x] Team-Normalisierung in `dim_team`: `team_code` eingefuehrt und `team_name` auf Anzeigeformat `RBL (RB Leipzig)` standardisiert.
 - [x] Spielerbild-Feld in `dim_player` ergaenzt: Bilddaten als `BYTEA` + `image_mime` + `image_sha256`.
 - [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
-- [ ] Danach schrittweise auf Full-Roster hochskalieren (Rate-Limit/Retry beibehalten).
+- [x] Team-Schluessel vereinheitlicht: `team_uid` als sprechender Text-Key (primär Teamkuerzel wie `RBL`, `BVB`) statt numerischer Surrogate-Key.
+- [x] Identity-Merge eingefuehrt: wenn sich `player_uid` verbessert (z.B. von `...00000000` auf `...YYYYMMDD`), werden bestehende Facts/Bridges konsistent auf den Ziel-Key uebernommen.
+- [x] Inkrementeller Lasttest abgeschlossen: 5-Spieler-Load erfolgreich gegen Postgres (`market_value`, `fact_player_match`, `fact_player_event`, Team/Match-Dims).
+- [ ] Danach schrittweise auf Full-Roster hochskalieren (erst 50er Batches, dann vollstaendig; Rate-Limit/Retry beibehalten).
 
-### Tomorrow (2026-02-22)
+### Next Steps (2026-02-23)
 - [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.
 - [x] Bronze Viewer korrigiert: Latest-Timestamp je Tabelle statt nur gemeinsamer Timestamp.
-- [x] CI stabilisiert (`bash` Aufruf fuer Lint/Test, kein Execute-Bit-Fehler mehr).
+- [x] CI stabilisiert (`bash` Aufruf fuer Lint/Test, kein Execute-Bit-Fehler mehr) und Packaging-Dependencies fuer History-ETL nachgezogen.
 - [x] Bronze vereinheitlichen: altes `kickbase_match_stats` final aus lokalen Artefakten entfernt.
+- [x] History-Schema/ETL auf Teamkuerzel-UIDs umgestellt (`dim_team.team_uid`, `bridge_player_team.team_uid`, `dim_match.home/away_team_uid`).
+- [ ] 50-Spieler-Load als naechster Ingestion-Step fahren und Laufzeit/API-Rate validieren.
 - [ ] Silver v0.9 starten: `silver.player_snapshot` als sauberer Join-Layer implementieren.
 - [ ] Silver v0.9 starten: `silver.team_matchup_snapshot` mit Odds-Features und Formkurve.
 - [ ] Gold v1.0 spezifizieren: klare Feature-Gruppen fuer Startet, Punkte, Marktwert.

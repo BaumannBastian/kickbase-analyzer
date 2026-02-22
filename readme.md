@@ -16,6 +16,12 @@ Der Bronze-Layer ist funktional:
 - `ligainsider_status_snapshot`
 - `odds_match_snapshot`
 
+PostgreSQL History ist aktiv:
+- source-unabhaengiger `player_uid` in allen spielerbezogenen Facts
+- `team_uid` als sprechender Text-Key (z.B. `RBL`, `BVB`)
+- Spielerbilder als `BYTEA` in `dim_player`
+- Identity-Merge fuer `player_uid`-Transitions (z.B. wenn Birthdate spaeter verfuegbar wird)
+
 Private Ingestion kann jede Quelle einzeln laden:
 - `--sources kickbase`
 - `--sources ligainsider`
@@ -193,6 +199,7 @@ python -m scripts.powerbi_desktop.export_desktop_assets --project <gcp_project_i
 ## Roadmap (Kurz)
 
 - Bronze stabil und quellenweise steuerbar halten.
+- History-Load in kontrollierten Batches skalieren (5 -> 50 -> Full Roster).
 - Silver v0.9:
   - `silver.player_snapshot` (Kickbase + LigaInsider Join, eine Zeile je Spieler/Snapshot)
   - `silver.team_matchup_snapshot` (naechstes Matchup, Odds-Features, Formkurve)

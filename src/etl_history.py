@@ -1408,7 +1408,7 @@ def _resolve_team_uid(
     kickbase_team_id: int | None,
     team_code: str | None,
     team_lookup: Any,
-) -> int | None:
+) -> str | None:
     if kickbase_team_id is not None:
         mapped = team_lookup.by_kickbase_team_id.get(kickbase_team_id)
         if mapped is not None:
@@ -1456,6 +1456,7 @@ def main(argv: list[str] | None = None) -> int:
             get_existing_player_identity,
             get_max_market_value_date,
             insert_fact_player_events,
+            merge_player_identity,
             set_state,
             upsert_bridge_player_team,
             upsert_dim_event_types,
@@ -1609,6 +1610,21 @@ def main(argv: list[str] | None = None) -> int:
             if api_player_id is None:
                 LOGGER.warning("Skip player %s: kb_player_id missing", resolved_player_uid)
                 continue
+
+            if existing_identity is not None and existing_identity.player_uid != resolved_player_uid:
+                merged = merge_player_identity(
+                    conn,
+                    source_player_uid=existing_identity.player_uid,
+                    target_player_uid=resolved_player_uid,
+                    kb_player_id=player.kb_player_id,
+                    player_name=player.player_name,
+                )
+                if merged:
+                    existing_identity = get_existing_player_identity(
+                        conn,
+                        player_uid=resolved_player_uid,
+                        kb_player_id=player.kb_player_id,
+                    )
 
             image_result = ImageLoadResult(None, None, None, "missing_source")
             if args.skip_image_download:

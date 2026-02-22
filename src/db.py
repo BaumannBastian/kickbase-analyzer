@@ -61,8 +61,8 @@ class ExistingPlayerIdentity:
 
 @dataclass(frozen=True)
 class TeamLookup:
-    by_kickbase_team_id: dict[int, int]
-    by_team_code: dict[str, int]
+    by_kickbase_team_id: dict[int, str]
+    by_team_code: dict[str, str]
 
 
 def get_connection(config: DbConfig) -> PgConnection:
@@ -127,6 +127,141 @@ def get_existing_player_identity(
         image_sha256=_to_text_or_none(row[3]),
         image_mime=_to_text_or_none(row[4]),
     )
+
+
+def merge_player_identity(
+    conn: PgConnection,
+    *,
+    source_player_uid: str,
+    target_player_uid: str,
+    kb_player_id: int | None,
+    player_name: str | None = None,
+) -> bool:
+    source_uid = str(source_player_uid).strip()
+    target_uid = str(target_player_uid).strip()
+    if not source_uid or not target_uid or source_uid == target_uid:
+        return False
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM dim_player WHERE player_uid = %s", (source_uid,))
+        source_exists = cur.fetchone() is not None
+        if not source_exists:
+            return False
+
+        # Ensure target exists so FK updates have a valid destination.
+        cur.execute(
+            """
+            INSERT INTO dim_player (player_uid, kb_player_id, player_name)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (player_uid)
+            DO UPDATE SET
+                kb_player_id = COALESCE(dim_player.kb_player_id, EXCLUDED.kb_player_id),
+                player_name = COALESCE(dim_player.player_name, EXCLUDED.player_name),
+                updated_at = now()
+            """,
+            (target_uid, kb_player_id, (player_name or target_uid)),
+        )
+
+        # Move current source kb id away first to avoid unique conflicts while assigning to target.
+        if kb_player_id is not None:
+            cur.execute(
+                """
+                UPDATE dim_player
+                SET kb_player_id = NULL,
+                    updated_at = now()
+                WHERE player_uid = %s
+                  AND kb_player_id = %s
+                """,
+                (source_uid, kb_player_id),
+            )
+
+        cur.execute(
+            """
+            INSERT INTO bridge_player_team (
+                player_uid, season_uid, team_uid, valid_from, valid_to, source, created_at, updated_at
+            )
+            SELECT
+                %s, season_uid, team_uid, valid_from, valid_to, source, created_at, now()
+            FROM bridge_player_team
+            WHERE player_uid = %s
+            ON CONFLICT (player_uid, season_uid, source)
+            DO UPDATE SET
+                team_uid = EXCLUDED.team_uid,
+                valid_from = COALESCE(EXCLUDED.valid_from, bridge_player_team.valid_from),
+                valid_to = COALESCE(EXCLUDED.valid_to, bridge_player_team.valid_to),
+                updated_at = now()
+            """,
+            (target_uid, source_uid),
+        )
+        cur.execute("DELETE FROM bridge_player_team WHERE player_uid = %s", (source_uid,))
+
+        cur.execute(
+            """
+            INSERT INTO fact_market_value_daily (player_uid, mv_date, market_value, source_dt_days, ingested_at)
+            SELECT
+                %s, mv_date, market_value, source_dt_days, ingested_at
+            FROM fact_market_value_daily
+            WHERE player_uid = %s
+            ON CONFLICT (player_uid, mv_date)
+            DO UPDATE SET
+                market_value = EXCLUDED.market_value,
+                source_dt_days = COALESCE(EXCLUDED.source_dt_days, fact_market_value_daily.source_dt_days),
+                ingested_at = now()
+            """,
+            (target_uid, source_uid),
+        )
+        cur.execute("DELETE FROM fact_market_value_daily WHERE player_uid = %s", (source_uid,))
+
+        cur.execute(
+            """
+            INSERT INTO fact_player_match (player_uid, match_uid, points_total, is_home, match_result, raw_json, ingested_at)
+            SELECT
+                %s, match_uid, points_total, is_home, match_result, raw_json, ingested_at
+            FROM fact_player_match
+            WHERE player_uid = %s
+            ON CONFLICT (player_uid, match_uid)
+            DO UPDATE SET
+                points_total = EXCLUDED.points_total,
+                is_home = COALESCE(EXCLUDED.is_home, fact_player_match.is_home),
+                match_result = COALESCE(EXCLUDED.match_result, fact_player_match.match_result),
+                raw_json = EXCLUDED.raw_json,
+                ingested_at = now()
+            """,
+            (target_uid, source_uid),
+        )
+        cur.execute("DELETE FROM fact_player_match WHERE player_uid = %s", (source_uid,))
+
+        cur.execute(
+            """
+            UPDATE fact_player_event
+            SET player_uid = %s,
+                ingested_at = now()
+            WHERE player_uid = %s
+            """,
+            (target_uid, source_uid),
+        )
+
+        if kb_player_id is not None:
+            cur.execute(
+                """
+                UPDATE dim_player
+                SET kb_player_id = %s,
+                    updated_at = now()
+                WHERE player_uid = %s
+                """,
+                (kb_player_id, target_uid),
+            )
+
+        cur.execute(
+            """
+            DELETE FROM dim_player
+            WHERE player_uid = %s
+              AND player_uid <> %s
+            """,
+            (source_uid, target_uid),
+        )
+
+    return True
 
 
 def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tuple[int, int]:
@@ -317,8 +452,8 @@ def upsert_dim_teams(
 ) -> tuple[TeamLookup, int, int]:
     inserted_total = 0
     updated_total = 0
-    by_kickbase_team_id: dict[int, int] = {}
-    by_team_code: dict[str, int] = {}
+    by_kickbase_team_id: dict[int, str] = {}
+    by_team_code: dict[str, str] = {}
 
     if not rows:
         return TeamLookup(by_kickbase_team_id, by_team_code), inserted_total, updated_total
@@ -333,6 +468,7 @@ def upsert_dim_teams(
         dedup[(kickbase_team_id, team_code)] = {
             "kickbase_team_id": kickbase_team_id,
             "team_code": team_code,
+            "team_uid": _build_team_uid(team_code=team_code, kickbase_team_id=kickbase_team_id),
             "team_name": team_name,
         }
 
@@ -340,43 +476,47 @@ def upsert_dim_teams(
         for row in dedup.values():
             kickbase_team_id = row["kickbase_team_id"]
             team_code = row["team_code"]
+            team_uid = row["team_uid"]
             team_name = row["team_name"]
 
             if team_code is not None:
                 cur.execute(
                     """
-                    INSERT INTO dim_team (league_key, kickbase_team_id, team_code, team_name)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (league_key, team_code)
                     DO UPDATE SET
+                        team_uid = EXCLUDED.team_uid,
                         kickbase_team_id = COALESCE(EXCLUDED.kickbase_team_id, dim_team.kickbase_team_id),
                         team_name = COALESCE(EXCLUDED.team_name, dim_team.team_name),
                         updated_at = now()
                     RETURNING team_uid, (xmax = 0) AS inserted
                     """,
-                    (league_key, kickbase_team_id, team_code, team_name),
+                    (team_uid, league_key, kickbase_team_id, team_code, team_name),
                 )
             else:
                 cur.execute(
                     """
-                    INSERT INTO dim_team (league_key, kickbase_team_id, team_code, team_name)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (league_key, kickbase_team_id)
                     DO UPDATE SET
+                        team_uid = EXCLUDED.team_uid,
                         team_name = COALESCE(EXCLUDED.team_name, dim_team.team_name),
                         updated_at = now()
                     RETURNING team_uid, (xmax = 0) AS inserted
                     """,
-                    (league_key, kickbase_team_id, team_code, team_name),
+                    (team_uid, league_key, kickbase_team_id, team_code, team_name),
                 )
 
             team_uid, inserted_flag = cur.fetchone()
             inserted_total += 1 if bool(inserted_flag) else 0
             updated_total += 0 if bool(inserted_flag) else 1
+            team_uid_text = str(team_uid)
             if kickbase_team_id is not None:
-                by_kickbase_team_id[int(kickbase_team_id)] = int(team_uid)
+                by_kickbase_team_id[int(kickbase_team_id)] = team_uid_text
             if team_code is not None:
-                by_team_code[str(team_code).upper()] = int(team_uid)
+                by_team_code[str(team_code).upper()] = team_uid_text
 
         if by_kickbase_team_id:
             cur.execute(
@@ -390,7 +530,7 @@ def upsert_dim_teams(
             )
             for kickbase_team_id, team_uid in cur.fetchall():
                 if kickbase_team_id is not None:
-                    by_kickbase_team_id[int(kickbase_team_id)] = int(team_uid)
+                    by_kickbase_team_id[int(kickbase_team_id)] = str(team_uid)
 
         if by_team_code:
             cur.execute(
@@ -404,7 +544,7 @@ def upsert_dim_teams(
             )
             for team_code, team_uid in cur.fetchall():
                 if team_code:
-                    by_team_code[str(team_code).upper()] = int(team_uid)
+                    by_team_code[str(team_code).upper()] = str(team_uid)
 
     return TeamLookup(by_kickbase_team_id, by_team_code), inserted_total, updated_total
 
@@ -417,7 +557,7 @@ def upsert_bridge_player_team(conn: PgConnection, rows: Sequence[dict[str, Any]]
         (
             str(row["player_uid"]),
             int(row["season_uid"]),
-            int(row["team_uid"]),
+            str(row["team_uid"]),
             row.get("valid_from"),
             row.get("valid_to"),
             str(row.get("source") or "kickbase"),
@@ -461,8 +601,8 @@ def upsert_dim_matches(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             _to_int_or_none(row.get("season_uid")),
             str(row["season_label"]),
             int(row["matchday"]),
-            _to_int_or_none(row.get("home_team_uid")),
-            _to_int_or_none(row.get("away_team_uid")),
+            _to_text_or_none(row.get("home_team_uid")),
+            _to_text_or_none(row.get("away_team_uid")),
             row.get("kickoff_ts"),
             _to_int_or_none(row.get("score_home")),
             _to_int_or_none(row.get("score_away")),
@@ -811,6 +951,15 @@ def _to_bool_or_none(value: Any) -> bool | None:
 def _safe_filename(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
     return cleaned or "player"
+
+
+def _build_team_uid(*, team_code: str | None, kickbase_team_id: int | None) -> str:
+    normalized_code = _to_text_or_none(team_code)
+    if normalized_code:
+        return normalized_code.upper()
+    if kickbase_team_id is not None:
+        return f"T{kickbase_team_id}"
+    return "TNA"
 
 
 def _season_uid_from_label(season_label: str) -> int:
