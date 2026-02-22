@@ -23,7 +23,11 @@ requires-python = ">=3.11"
 authors = [
   { name = "Bastian Baumann" }
 ]
-dependencies = []
+dependencies = [
+  "requests>=2.32.0",
+  "python-dotenv>=1.0.1",
+  "psycopg2-binary>=2.9.9"
+]
 
 [project.optional-dependencies]
 dev = [
