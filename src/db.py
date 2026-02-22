@@ -16,8 +16,10 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from datetime import date
+import hashlib
 import os
 from pathlib import Path
+import re
 from typing import Any, Sequence
 
 import psycopg2
@@ -50,7 +52,7 @@ class DbConfig:
 
 @dataclass(frozen=True)
 class ExistingPlayerIdentity:
-    player_uid: int
+    player_uid: str
     kb_player_id: int | None
     birthdate: date | None
     image_sha256: str | None
@@ -78,26 +80,12 @@ def get_connection(config: DbConfig) -> PgConnection:
 def get_existing_player_identity(
     conn: PgConnection,
     *,
-    player_uid: int,
+    player_uid: str | None,
     kb_player_id: int | None,
 ) -> ExistingPlayerIdentity | None:
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                player_uid,
-                kb_player_id,
-                birthdate,
-                image_sha256,
-                image_mime
-            FROM dim_player
-            WHERE player_uid = %s
-            """,
-            (player_uid,),
-        )
-        row = cur.fetchone()
-
-        if row is None and kb_player_id is not None:
+        row = None
+        if kb_player_id is not None:
             cur.execute(
                 """
                 SELECT
@@ -113,11 +101,27 @@ def get_existing_player_identity(
             )
             row = cur.fetchone()
 
+        if row is None and player_uid:
+            cur.execute(
+                """
+                SELECT
+                    player_uid,
+                    kb_player_id,
+                    birthdate,
+                    image_sha256,
+                    image_mime
+                FROM dim_player
+                WHERE player_uid = %s
+                """,
+                (player_uid,),
+            )
+            row = cur.fetchone()
+
     if row is None:
         return None
 
     return ExistingPlayerIdentity(
-        player_uid=int(row[0]),
+        player_uid=str(row[0]),
         kb_player_id=_to_int_or_none(row[1]),
         birthdate=row[2],
         image_sha256=_to_text_or_none(row[3]),
@@ -134,14 +138,18 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
 
     for row in rows:
         value = (
-            int(row["player_uid"]),
+            str(row["player_uid"]),
             _to_int_or_none(row.get("kb_player_id")),
             str(row.get("player_name") or f"player_{row['player_uid']}").strip(),
+            _to_int_or_none(row.get("ligainsider_player_id")),
+            _to_text_or_none(row.get("ligainsider_player_slug")),
+            _to_text_or_none(row.get("ligainsider_player_name")),
             _to_text_or_none(row.get("position")),
             row.get("birthdate"),
             row.get("image_blob"),
             _to_text_or_none(row.get("image_mime")),
             _to_text_or_none(row.get("image_sha256")),
+            _to_text_or_none(row.get("image_source_url")),
         )
         if value[1] is None:
             values_without_kickbase_id.append(value)
@@ -156,17 +164,24 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             player_uid,
             kb_player_id,
             player_name,
+            ligainsider_player_id,
+            ligainsider_player_slug,
+            ligainsider_player_name,
             position,
             birthdate,
             image_blob,
             image_mime,
-            image_sha256
+            image_sha256,
+            image_source_url
         )
         VALUES %s
         ON CONFLICT (kb_player_id)
         DO UPDATE SET
             player_uid = EXCLUDED.player_uid,
             player_name = EXCLUDED.player_name,
+            ligainsider_player_id = COALESCE(EXCLUDED.ligainsider_player_id, dim_player.ligainsider_player_id),
+            ligainsider_player_slug = COALESCE(EXCLUDED.ligainsider_player_slug, dim_player.ligainsider_player_slug),
+            ligainsider_player_name = COALESCE(EXCLUDED.ligainsider_player_name, dim_player.ligainsider_player_name),
             position = COALESCE(EXCLUDED.position, dim_player.position),
             birthdate = COALESCE(EXCLUDED.birthdate, dim_player.birthdate),
             image_blob = CASE
@@ -182,6 +197,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
                 ELSE dim_player.image_mime
             END,
             image_sha256 = COALESCE(EXCLUDED.image_sha256, dim_player.image_sha256),
+            image_source_url = COALESCE(EXCLUDED.image_source_url, dim_player.image_source_url),
             updated_at = now()
         RETURNING (xmax = 0) AS inserted
     """
@@ -191,16 +207,23 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             player_uid,
             kb_player_id,
             player_name,
+            ligainsider_player_id,
+            ligainsider_player_slug,
+            ligainsider_player_name,
             position,
             birthdate,
             image_blob,
             image_mime,
-            image_sha256
+            image_sha256,
+            image_source_url
         )
         VALUES %s
         ON CONFLICT (player_uid)
         DO UPDATE SET
             player_name = EXCLUDED.player_name,
+            ligainsider_player_id = COALESCE(EXCLUDED.ligainsider_player_id, dim_player.ligainsider_player_id),
+            ligainsider_player_slug = COALESCE(EXCLUDED.ligainsider_player_slug, dim_player.ligainsider_player_slug),
+            ligainsider_player_name = COALESCE(EXCLUDED.ligainsider_player_name, dim_player.ligainsider_player_name),
             position = COALESCE(EXCLUDED.position, dim_player.position),
             birthdate = COALESCE(EXCLUDED.birthdate, dim_player.birthdate),
             image_blob = CASE
@@ -216,6 +239,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
                 ELSE dim_player.image_mime
             END,
             image_sha256 = COALESCE(EXCLUDED.image_sha256, dim_player.image_sha256),
+            image_source_url = COALESCE(EXCLUDED.image_source_url, dim_player.image_source_url),
             updated_at = now()
         RETURNING (xmax = 0) AS inserted
     """
@@ -267,16 +291,17 @@ def upsert_dim_event_types(conn: PgConnection, rows: Sequence[dict[str, Any]]) -
 
 
 def ensure_season(conn: PgConnection, *, league_key: str, season_label: str) -> int:
+    season_uid = _season_uid_from_label(season_label)
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO dim_season (league_key, season_label)
-            VALUES (%s, %s)
+            INSERT INTO dim_season (season_uid, league_key, season_label)
+            VALUES (%s, %s, %s)
             ON CONFLICT (league_key, season_label)
             DO UPDATE SET updated_at = now()
             RETURNING season_uid
             """,
-            (league_key, season_label),
+            (season_uid, league_key, season_label),
         )
         row = cur.fetchone()
     if row is None:
@@ -390,7 +415,7 @@ def upsert_bridge_player_team(conn: PgConnection, rows: Sequence[dict[str, Any]]
 
     values = [
         (
-            int(row["player_uid"]),
+            str(row["player_uid"]),
             int(row["season_uid"]),
             int(row["team_uid"]),
             row.get("valid_from"),
@@ -481,7 +506,7 @@ def upsert_dim_matches(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
     return _count_inserted_updated(result)
 
 
-def get_max_market_value_date(conn: PgConnection, player_uid: int) -> date | None:
+def get_max_market_value_date(conn: PgConnection, player_uid: str) -> date | None:
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -504,7 +529,7 @@ def upsert_market_values(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> 
 
     values = [
         (
-            int(row["player_uid"]),
+            str(row["player_uid"]),
             row["mv_date"],
             int(row["market_value"]),
             _to_int_or_none(row.get("source_dt_days")),
@@ -535,7 +560,7 @@ def upsert_fact_player_match(conn: PgConnection, rows: Sequence[dict[str, Any]])
 
     values = [
         (
-            int(row["player_uid"]),
+            str(row["player_uid"]),
             str(row["match_uid"]),
             int(row["points_total"]),
             _to_bool_or_none(row.get("is_home")),
@@ -577,7 +602,7 @@ def insert_fact_player_events(conn: PgConnection, rows: Sequence[dict[str, Any]]
     values = [
         (
             str(row["event_hash"]),
-            int(row["player_uid"]),
+            str(row["player_uid"]),
             str(row["match_uid"]),
             int(row["event_type_id"]),
             int(row["points"]),
@@ -642,10 +667,14 @@ def export_raw_tables_to_csv(conn: PgConnection, output_dir: Path) -> list[Path]
                 player_uid,
                 kb_player_id,
                 player_name,
+                ligainsider_player_id,
+                ligainsider_player_slug,
+                ligainsider_player_name,
                 position,
                 birthdate,
                 image_mime,
                 image_sha256,
+                image_source_url,
                 created_at,
                 updated_at
             FROM dim_player
@@ -715,11 +744,11 @@ def export_player_images(conn: PgConnection, output_dir: Path) -> tuple[list[Pat
             if image_blob is None:
                 continue
             extension = _extension_from_mime(_to_text_or_none(image_mime))
-            filename = f"{int(player_uid)}.{extension}"
+            filename = f"{_safe_filename(str(player_uid))}.{extension}"
             image_path = output_dir / filename
             image_path.write_bytes(bytes(image_blob))
             written_images.append(image_path)
-            writer.writerow([int(player_uid), image_mime, image_sha256, filename])
+            writer.writerow([str(player_uid), image_mime, image_sha256, filename])
 
     return written_images, mapping_path
 
@@ -777,3 +806,19 @@ def _to_bool_or_none(value: Any) -> bool | None:
         if text in {"false", "0", "no", "n"}:
             return False
     return None
+
+
+def _safe_filename(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
+    return cleaned or "player"
+
+
+def _season_uid_from_label(season_label: str) -> int:
+    text = (season_label or "").strip()
+    match = re.match(r"^(\d{4})\s*/\s*(\d{4})$", text)
+    if match is not None:
+        return int(match.group(1)[-2:] + match.group(2)[-2:])
+
+    # deterministic fallback for non-standard labels
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()
+    return 900000 + (int(digest[:6], 16) % 9999)
