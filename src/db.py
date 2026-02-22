@@ -57,6 +57,8 @@ class ExistingPlayerIdentity:
     birthdate: date | None
     image_sha256: str | None
     image_mime: str | None
+    image_local_path: str | None
+    image_blob: bytes | None
 
 
 @dataclass(frozen=True)
@@ -93,7 +95,9 @@ def get_existing_player_identity(
                     kb_player_id,
                     birthdate,
                     image_sha256,
-                    image_mime
+                    image_mime,
+                    image_local_path,
+                    image_blob
                 FROM dim_player
                 WHERE kb_player_id = %s
                 """,
@@ -109,7 +113,9 @@ def get_existing_player_identity(
                     kb_player_id,
                     birthdate,
                     image_sha256,
-                    image_mime
+                    image_mime,
+                    image_local_path,
+                    image_blob
                 FROM dim_player
                 WHERE player_uid = %s
                 """,
@@ -126,6 +132,8 @@ def get_existing_player_identity(
         birthdate=row[2],
         image_sha256=_to_text_or_none(row[3]),
         image_mime=_to_text_or_none(row[4]),
+        image_local_path=_to_text_or_none(row[5]),
+        image_blob=bytes(row[6]) if row[6] is not None else None,
     )
 
 
@@ -159,20 +167,20 @@ def merge_player_identity(
                 player_name = COALESCE(dim_player.player_name, EXCLUDED.player_name),
                 updated_at = now()
             """,
-            (target_uid, kb_player_id, (player_name or target_uid)),
+            (target_uid, None, (player_name or target_uid)),
         )
 
-        # Move current source kb id away first to avoid unique conflicts while assigning to target.
+        # Move current kb id away first to avoid unique conflicts while assigning to target.
         if kb_player_id is not None:
             cur.execute(
                 """
                 UPDATE dim_player
                 SET kb_player_id = NULL,
                     updated_at = now()
-                WHERE player_uid = %s
-                  AND kb_player_id = %s
+                WHERE kb_player_id = %s
+                  AND player_uid <> %s
                 """,
-                (source_uid, kb_player_id),
+                (kb_player_id, target_uid),
             )
 
         cur.execute(
@@ -261,6 +269,30 @@ def merge_player_identity(
             (source_uid, target_uid),
         )
 
+        cur.execute(
+            """
+            INSERT INTO etl_state (key, value, updated_at)
+            SELECT
+                REPLACE(key, %s, %s) AS key,
+                value,
+                now()
+            FROM etl_state
+            WHERE key LIKE %s
+            ON CONFLICT (key)
+            DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = now()
+            """,
+            (source_uid, target_uid, f"%{source_uid}%"),
+        )
+        cur.execute(
+            """
+            DELETE FROM etl_state
+            WHERE key LIKE %s
+            """,
+            (f"%{source_uid}%",),
+        )
+
     return True
 
 
@@ -284,7 +316,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             row.get("image_blob"),
             _to_text_or_none(row.get("image_mime")),
             _to_text_or_none(row.get("image_sha256")),
-            _to_text_or_none(row.get("image_source_url")),
+            _to_text_or_none(row.get("image_local_path")),
         )
         if value[1] is None:
             values_without_kickbase_id.append(value)
@@ -307,7 +339,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             image_blob,
             image_mime,
             image_sha256,
-            image_source_url
+            image_local_path
         )
         VALUES %s
         ON CONFLICT (kb_player_id)
@@ -332,7 +364,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
                 ELSE dim_player.image_mime
             END,
             image_sha256 = COALESCE(EXCLUDED.image_sha256, dim_player.image_sha256),
-            image_source_url = COALESCE(EXCLUDED.image_source_url, dim_player.image_source_url),
+            image_local_path = COALESCE(EXCLUDED.image_local_path, dim_player.image_local_path),
             updated_at = now()
         RETURNING (xmax = 0) AS inserted
     """
@@ -350,7 +382,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
             image_blob,
             image_mime,
             image_sha256,
-            image_source_url
+            image_local_path
         )
         VALUES %s
         ON CONFLICT (player_uid)
@@ -374,7 +406,7 @@ def upsert_dim_players(conn: PgConnection, rows: Sequence[dict[str, Any]]) -> tu
                 ELSE dim_player.image_mime
             END,
             image_sha256 = COALESCE(EXCLUDED.image_sha256, dim_player.image_sha256),
-            image_source_url = COALESCE(EXCLUDED.image_source_url, dim_player.image_source_url),
+            image_local_path = COALESCE(EXCLUDED.image_local_path, dim_player.image_local_path),
             updated_at = now()
         RETURNING (xmax = 0) AS inserted
     """
@@ -814,7 +846,7 @@ def export_raw_tables_to_csv(conn: PgConnection, output_dir: Path) -> list[Path]
                 birthdate,
                 image_mime,
                 image_sha256,
-                image_source_url,
+                image_local_path,
                 created_at,
                 updated_at
             FROM dim_player

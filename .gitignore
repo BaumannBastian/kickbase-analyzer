@@ -33,6 +33,8 @@ data/lakehouse/
 data/marts/
 data/backtesting/
 data/warehouse/
+data/history/
+.cache/
 out/
 
 # Power BI Desktop local artifacts

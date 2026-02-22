@@ -168,6 +168,7 @@ Wichtige Felder:
 - `dim_player.player_uid` (interner stabiler Schluessel)
 - `dim_player.kb_player_id` als explizite Kickbase-Referenz-ID
 - `dim_player.image_blob` (`BYTEA`) + `image_mime` + `image_sha256` fuer Spielerbilder
+- `dim_player.image_local_path` fuer den lokalen Datei-Link (`data/history/player_images/<player_uid>.jpg`)
 - `dim_team.team_code` + `dim_team.team_name` im Format `RBL (RB Leipzig)`
 - `fact_market_value_daily.mv_date`, `fact_market_value_daily.market_value`
 - `fact_player_match.match_uid` im kompakten Format `25/26-MD23-RBLBVB`
@@ -222,6 +223,8 @@ Erledigt heute:
 - [x] History-Schema auf `kb_player_id` umgestellt (klar getrennt von internem `player_uid`)
 - [x] Kompakte `match_uid` eingefuehrt (`25/26-MD23-RBLBVB` statt Timestamp/Team-ID-Kombination)
 - [x] Teamnamen auf Anzeigeformat `RBL (RB Leipzig)` standardisiert und Bildspeicherung auf `BYTEA` umgestellt
+- [x] LigaInsider-Enrichment gehaertet (Name/Slug/Last-Name-Fallback), Birthdates fuer 5er-Testload gezogen und `player_uid`-Merges auf `YYYYMMDD` validiert
+- [x] Bildpfad in DB auf lokalen Dateipfad umgestellt (`dim_player.image_local_path`) statt externer URL
 
 Offen fuer morgen (V0.9):
 - [ ] Kickbase-Ingestion-Frequenzen entkoppeln (Marktwert taeglich, Performance an Spieltagen, Status/Lineup intraday).

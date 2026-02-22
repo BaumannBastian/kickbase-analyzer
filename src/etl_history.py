@@ -93,6 +93,13 @@ class ImageLoadResult:
     status: str
 
 
+@dataclass(frozen=True)
+class LigaInsiderLookup:
+    by_exact_name: dict[str, dict[str, Any]]
+    by_last_name: dict[str, dict[str, Any]]
+    by_slug: dict[str, dict[str, Any]]
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Kickbase history ETL -> PostgreSQL RAW schema")
     parser.add_argument("--env-file", default=".env", help="Pfad zur .env Datei")
@@ -132,6 +139,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image-retries", type=int, default=int(os.getenv("IMAGE_RETRIES", "2")))
     parser.add_argument("--image-backoff-seconds", type=float, default=float(os.getenv("IMAGE_BACKOFF_SECONDS", "1")))
     parser.add_argument("--image-cache-dir", default=os.getenv("IMAGE_CACHE_DIR", ".cache/player_images"))
+    parser.add_argument("--image-store-dir", default=os.getenv("IMAGE_STORE_DIR", "data/history/player_images"))
 
     parser.add_argument("--export-dir", default=None, help="Optionales Exportverzeichnis fuer CSV/Bilder")
     parser.add_argument("--export-tables", action="store_true", help="Exportiert Tabellen als CSV (ohne image_blob)")
@@ -310,14 +318,17 @@ def select_players(players: list[PlayerMaster], args: argparse.Namespace) -> lis
     return out
 
 
-def load_latest_ligainsider_name_map(input_dir: Path) -> dict[str, dict[str, Any]]:
+def load_latest_ligainsider_lookup(input_dir: Path) -> LigaInsiderLookup:
     files = sorted(input_dir.glob("ligainsider_status_snapshot_*.ndjson"))
     if not files:
-        return {}
+        return LigaInsiderLookup(by_exact_name={}, by_last_name={}, by_slug={})
 
     latest = max(files, key=lambda path: path.name)
-    mapping: dict[str, dict[str, Any]] = {}
-    collisions: set[str] = set()
+    by_exact_name: dict[str, dict[str, Any]] = {}
+    by_last_name: dict[str, dict[str, Any]] = {}
+    by_slug: dict[str, dict[str, Any]] = {}
+    exact_collisions: set[str] = set()
+    last_name_collisions: set[str] = set()
 
     with latest.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -334,32 +345,59 @@ def load_latest_ligainsider_name_map(input_dir: Path) -> dict[str, dict[str, Any
             name = _to_text(_first_present(row, ["player_name", "name"]))
             if not name:
                 continue
-            key = _normalize_name(name)
-            if not key:
-                continue
+            key_full = _normalize_name(name)
+            if key_full:
+                _register_unique_lookup_row(by_exact_name, exact_collisions, key_full, row)
 
-            if key in mapping:
-                collisions.add(key)
-                continue
-            mapping[key] = row
+            key_last = _normalize_name(name.split()[-1]) if name.split() else ""
+            if key_last:
+                _register_unique_lookup_row(by_last_name, last_name_collisions, key_last, row)
 
-    for key in collisions:
-        mapping.pop(key, None)
+            slug = _to_text_or_none(row.get("ligainsider_player_slug"))
+            if slug:
+                by_slug[slug.strip().lower()] = row
 
-    if collisions:
+    if exact_collisions:
         LOGGER.warning(
-            "LigaInsider Name-Kollisionen im Snapshot erkannt: %s Namen werden ignoriert.",
-            len(collisions),
+            "LigaInsider Name-Kollisionen im Snapshot erkannt: %s exakte Namen werden ignoriert.",
+            len(exact_collisions),
         )
 
-    return mapping
+    if last_name_collisions:
+        LOGGER.warning(
+            "LigaInsider Last-Name-Kollisionen im Snapshot erkannt: %s Nachnamen werden ignoriert.",
+            len(last_name_collisions),
+        )
+
+    return LigaInsiderLookup(
+        by_exact_name=by_exact_name,
+        by_last_name=by_last_name,
+        by_slug=by_slug,
+    )
+
+
+def _register_unique_lookup_row(
+    mapping: dict[str, dict[str, Any]],
+    collisions: set[str],
+    key: str,
+    row: dict[str, Any],
+) -> None:
+    if not key:
+        return
+    if key in collisions:
+        return
+    if key in mapping:
+        mapping.pop(key, None)
+        collisions.add(key)
+        return
+    mapping[key] = row
 
 
 def resolve_player_enrichment(
     *,
     player: PlayerMaster,
     existing_identity: Any,
-    ligainsider_name_map: dict[str, dict[str, Any]],
+    ligainsider_lookup: LigaInsiderLookup,
     ligainsider_profile_cache: dict[str, dict[str, Any]],
     ligainsider_session: requests.Session,
     ligainsider_timeout_seconds: float,
@@ -373,37 +411,51 @@ def resolve_player_enrichment(
     if existing_identity is not None and birthdate is None:
         birthdate = existing_identity.birthdate
 
-    if not ligainsider_slug:
-        li_row = ligainsider_name_map.get(_normalize_name(player.player_name))
-        if li_row is not None:
+    li_row = _resolve_ligainsider_row_for_player(player, ligainsider_lookup)
+    if li_row is not None:
+        if not ligainsider_slug:
             ligainsider_slug = _to_text_or_none(li_row.get("ligainsider_player_slug"))
+        if ligainsider_player_id is None:
             ligainsider_player_id = _to_int(li_row.get("ligainsider_player_id"))
+        if ligainsider_player_name is None:
             ligainsider_player_name = _to_text_or_none(_first_present(li_row, ["player_name", "name"]))
-            if image_url is None:
-                image_url = _normalize_image_url(
-                    _to_text_or_none(
-                        _first_present(
-                            li_row,
-                            [
-                                "player_image_url",
-                                "image_url",
-                                "player_image",
-                                "photo_url",
-                            ],
-                        )
+        if image_url is None:
+            image_url = _normalize_image_url(
+                _to_text_or_none(
+                    _first_present(
+                        li_row,
+                        [
+                            "player_image_url",
+                            "image_url",
+                            "player_image",
+                            "photo_url",
+                        ],
                     )
                 )
+            )
 
-    if ligainsider_slug and (birthdate is None or image_url is None):
-        profile = ligainsider_profile_cache.get(ligainsider_slug)
+    needs_profile_lookup = (
+        birthdate is None
+        or image_url is None
+        or ligainsider_slug is None
+        or ligainsider_player_id is None
+    )
+    if needs_profile_lookup:
+        profile_cache_key = (
+            ligainsider_slug.strip().lower()
+            if ligainsider_slug
+            else f"name:{_slugify_for_ligainsider(player.player_name)}"
+        )
+        profile = ligainsider_profile_cache.get(profile_cache_key)
         if profile is None:
             profile = fetch_ligainsider_profile(
                 session=ligainsider_session,
+                player_name=player.player_name,
                 slug=ligainsider_slug,
                 ligainsider_player_id=ligainsider_player_id,
                 timeout_seconds=ligainsider_timeout_seconds,
             )
-            ligainsider_profile_cache[ligainsider_slug] = profile
+            ligainsider_profile_cache[profile_cache_key] = profile
 
         if birthdate is None:
             birthdate = _parse_date(profile.get("birthdate"))
@@ -411,6 +463,10 @@ def resolve_player_enrichment(
             image_url = _normalize_image_url(_to_text_or_none(profile.get("image_url")))
         if ligainsider_player_name is None:
             ligainsider_player_name = _to_text_or_none(profile.get("player_name"))
+        if ligainsider_slug is None:
+            ligainsider_slug = _to_text_or_none(profile.get("ligainsider_player_slug"))
+        if ligainsider_player_id is None:
+            ligainsider_player_id = _to_int(profile.get("ligainsider_player_id"))
 
     return {
         "birthdate": birthdate,
@@ -421,25 +477,69 @@ def resolve_player_enrichment(
     }
 
 
+def _resolve_ligainsider_row_for_player(
+    player: PlayerMaster,
+    lookup: LigaInsiderLookup,
+) -> dict[str, Any] | None:
+    slug = _to_text_or_none(player.ligainsider_player_slug)
+    if slug:
+        row = lookup.by_slug.get(slug.strip().lower())
+        if row is not None:
+            return row
+
+    full_key = _normalize_name(player.player_name)
+    if full_key:
+        row = lookup.by_exact_name.get(full_key)
+        if row is not None:
+            return row
+
+    tokens = [token for token in re.split(r"\s+", player.player_name.strip()) if token]
+    if tokens:
+        last_name_key = _normalize_name(tokens[-1])
+        if last_name_key:
+            row = lookup.by_last_name.get(last_name_key)
+            if row is not None:
+                return row
+
+    return None
+
+
 def fetch_ligainsider_profile(
     *,
     session: requests.Session,
-    slug: str,
+    player_name: str,
+    slug: str | None,
     ligainsider_player_id: int | None,
     timeout_seconds: float,
 ) -> dict[str, Any]:
     base_url = os.getenv("LIGAINSIDER_BASE_URL", "https://www.ligainsider.de").rstrip("/")
+    slug_candidates: list[str] = []
+    if slug:
+        slug_candidates.append(slug.strip().lower())
+    derived_slug = _slugify_for_ligainsider(player_name)
+    if derived_slug and derived_slug not in slug_candidates:
+        slug_candidates.append(derived_slug)
+
     url_candidates: list[str] = []
-    if ligainsider_player_id is not None:
-        url_candidates.append(f"{base_url}/{slug}_{ligainsider_player_id}/")
-    url_candidates.append(f"{base_url}/{slug}/")
+    for slug_candidate in slug_candidates:
+        if ligainsider_player_id is not None:
+            url_candidates.append(f"{base_url}/{slug_candidate}_{ligainsider_player_id}/")
+        url_candidates.append(f"{base_url}/{slug_candidate}/")
+
+    deduped_candidates: list[str] = []
+    seen_candidates: set[str] = set()
+    for candidate in url_candidates:
+        if candidate in seen_candidates:
+            continue
+        seen_candidates.add(candidate)
+        deduped_candidates.append(candidate)
 
     headers = {
         "User-Agent": os.getenv("LIGAINSIDER_USER_AGENT", "kickbase-analyzer/1.0"),
         "Accept": "text/html,application/xhtml+xml",
     }
 
-    for url in url_candidates:
+    for url in deduped_candidates:
         try:
             response = session.get(url, timeout=timeout_seconds, headers=headers)
         except requests.RequestException:
@@ -450,26 +550,69 @@ def fetch_ligainsider_profile(
 
         birthdate = _extract_birth_date_from_ligainsider_html(response.text)
         image_url = _extract_player_image_from_ligainsider_html(response.text, page_url=url)
-        player_name = _extract_player_name_from_ligainsider_html(response.text)
-        if birthdate is not None or image_url is not None:
+        resolved_player_name = _extract_player_name_from_ligainsider_html(response.text)
+        resolved_slug, resolved_player_id = _extract_ligainsider_identity(
+            response_url=response.url,
+            html_text=response.text,
+        )
+        if (
+            birthdate is not None
+            or image_url is not None
+            or resolved_player_name is not None
+            or resolved_slug is not None
+            or resolved_player_id is not None
+        ):
             return {
                 "birthdate": birthdate,
                 "image_url": image_url,
-                "player_name": player_name,
+                "player_name": resolved_player_name,
+                "ligainsider_player_slug": resolved_slug,
+                "ligainsider_player_id": resolved_player_id,
             }
 
     return {
         "birthdate": None,
         "image_url": None,
         "player_name": None,
+        "ligainsider_player_slug": None,
+        "ligainsider_player_id": None,
     }
+
+
+def _extract_ligainsider_identity(
+    *,
+    response_url: str,
+    html_text: str,
+) -> tuple[str | None, int | None]:
+    canonical_match = re.search(
+        r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\'](?P<href>[^"\']+)["\']',
+        html_text,
+        flags=re.IGNORECASE,
+    )
+    patterns = [
+        response_url,
+        _to_text_or_none(canonical_match.group("href")) if canonical_match else None,
+    ]
+
+    for candidate in patterns:
+        if not candidate:
+            continue
+        match = re.search(r"/(?P<slug>[a-z0-9\-]+)_(?P<pid>\d+)(?:/|$)", candidate, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        slug = _to_text_or_none(match.group("slug"))
+        pid = _to_int(match.group("pid"))
+        return (slug.lower() if slug else None, pid)
+
+    return None, None
 
 
 def _extract_birth_date_from_ligainsider_html(html_text: str) -> date | None:
     patterns = [
         r'"birthDate"\s*:\s*"(?P<iso>\d{4}-\d{2}-\d{2})"',
-        r"Geburtstag[^0-9]{0,40}(?P<de>\d{2}\.\d{2}\.\d{4})",
-        r"geboren[^0-9]{0,40}(?P<de>\d{2}\.\d{2}\.\d{4})",
+        r'itemprop=["\']birthDate["\'][^>]*>\s*(?P<de>\d{2}\.\d{2}\.\d{4})',
+        r"Geburtstag[^0-9]{0,300}(?P<de>\d{2}\.\d{2}\.\d{4})",
+        r"geboren[^0-9]{0,300}(?P<de>\d{2}\.\d{2}\.\d{4})",
     ]
     for pattern in patterns:
         match = re.search(pattern, html_text, flags=re.IGNORECASE)
@@ -632,6 +775,30 @@ def _write_image_cache(
         ),
         encoding="utf-8",
     )
+
+
+def persist_player_image_file(
+    *,
+    player_uid: str,
+    image_blob: bytes,
+    image_mime: str,
+    output_dir: Path,
+) -> str:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extension = _image_extension_from_mime(image_mime)
+    filename = f"{_safe_cache_key(player_uid)}.{extension}"
+    file_path = output_dir / filename
+    file_path.write_bytes(image_blob)
+    return file_path.as_posix()
+
+
+def _image_extension_from_mime(image_mime: str | None) -> str:
+    if not image_mime:
+        return "bin"
+    normalized = image_mime.strip().lower()
+    if normalized == "image/png":
+        return "png"
+    return "jpg"
 
 
 def _download_image_with_retries(
@@ -1175,6 +1342,15 @@ def _normalize_name(value: str) -> str:
     return text or "unknown_player"
 
 
+def _slugify_for_ligainsider(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
+    normalized = normalized.strip("-")
+    return normalized
+
+
 def _build_player_uid(*, player_name: str, birthdate: date | None) -> str:
     name = unicodedata.normalize("NFKD", player_name or "")
     name = "".join(ch for ch in name if not unicodedata.combining(ch))
@@ -1476,13 +1652,14 @@ def main(argv: list[str] | None = None) -> int:
     players = load_players(args)
     players = select_players(players, args)
 
-    ligainsider_name_map = load_latest_ligainsider_name_map(Path("data/bronze"))
+    ligainsider_lookup = load_latest_ligainsider_lookup(Path("data/bronze"))
     ligainsider_profile_cache: dict[str, dict[str, Any]] = {}
     ligainsider_session = requests.Session()
     ligainsider_timeout_seconds = float(os.getenv("LIGAINSIDER_TIMEOUT_SECONDS", "15"))
 
     image_session = requests.Session()
     image_cache_dir = Path(args.image_cache_dir)
+    image_store_dir = Path(args.image_store_dir)
 
     kb_config = KickbaseApiConfig.from_env(rps=args.rps)
     if not kb_config.email or not kb_config.password:
@@ -1597,7 +1774,7 @@ def main(argv: list[str] | None = None) -> int:
             enrichment = resolve_player_enrichment(
                 player=player,
                 existing_identity=existing_identity,
-                ligainsider_name_map=ligainsider_name_map,
+                ligainsider_lookup=ligainsider_lookup,
                 ligainsider_profile_cache=ligainsider_profile_cache,
                 ligainsider_session=ligainsider_session,
                 ligainsider_timeout_seconds=ligainsider_timeout_seconds,
@@ -1651,6 +1828,27 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 summary["images_failed"] += 1
 
+            image_local_path = existing_identity.image_local_path if existing_identity is not None else None
+            if image_result.image_blob is not None and image_result.image_mime is not None:
+                image_local_path = persist_player_image_file(
+                    player_uid=resolved_player_uid,
+                    image_blob=image_result.image_blob,
+                    image_mime=image_result.image_mime,
+                    output_dir=image_store_dir,
+                )
+            elif (
+                not image_local_path
+                and existing_identity is not None
+                and existing_identity.image_blob is not None
+                and existing_identity.image_mime is not None
+            ):
+                image_local_path = persist_player_image_file(
+                    player_uid=resolved_player_uid,
+                    image_blob=existing_identity.image_blob,
+                    image_mime=existing_identity.image_mime,
+                    output_dir=image_store_dir,
+                )
+
             upsert_dim_players(
                 conn,
                 [
@@ -1666,7 +1864,7 @@ def main(argv: list[str] | None = None) -> int:
                         "image_blob": image_result.image_blob,
                         "image_mime": image_result.image_mime,
                         "image_sha256": image_result.image_sha256,
-                        "image_source_url": enrichment.get("image_url"),
+                        "image_local_path": image_local_path,
                     }
                 ],
             )

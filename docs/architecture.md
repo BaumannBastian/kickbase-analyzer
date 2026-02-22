@@ -365,10 +365,13 @@ kickbase-analyzer/
 - [x] `fact_player_match` verschlankt: kein redundantes `opponent_name`; Kontext laeuft ueber `dim_match`.
 - [x] Team-Normalisierung in `dim_team`: `team_code` eingefuehrt und `team_name` auf Anzeigeformat `RBL (RB Leipzig)` standardisiert.
 - [x] Spielerbild-Feld in `dim_player` ergaenzt: Bilddaten als `BYTEA` + `image_mime` + `image_sha256`.
+- [x] Bild-Persistenz auf lokale Datei-Pfade umgestellt: `dim_player.image_local_path` speichert den lokalen Bildpfad (`data/history/player_images/<player_uid>.jpg`) statt externer URL.
 - [x] Raw-only Prinzip fuer History-DB geschaerft: abgeleitete Tabelle `fact_match_event_agg` entfernt (Aggregation erst in Analyse/Silver+).
 - [x] Team-Schluessel vereinheitlicht: `team_uid` als sprechender Text-Key (primär Teamkuerzel wie `RBL`, `BVB`) statt numerischer Surrogate-Key.
 - [x] Identity-Merge eingefuehrt: wenn sich `player_uid` verbessert (z.B. von `...00000000` auf `...YYYYMMDD`), werden bestehende Facts/Bridges konsistent auf den Ziel-Key uebernommen.
+- [x] Identity-Merge gehaertet: Unique-Konflikte auf `kb_player_id` abgefangen und `etl_state`-Keys beim UID-Merge auf den Ziel-Key umgehangen.
 - [x] Inkrementeller Lasttest abgeschlossen: 5-Spieler-Load erfolgreich gegen Postgres (`market_value`, `fact_player_match`, `fact_player_event`, Team/Match-Dims).
+- [x] LigaInsider-Enrichment gehaertet: Fallback-Matching ueber exakten Namen, Nachnamen und Slug; Birthdates/LI-IDs fuer 5er-Testload nachgezogen und UID-Transition (`...00000000` -> `...YYYYMMDD`) erfolgreich validiert.
 - [ ] Danach schrittweise auf Full-Roster hochskalieren (erst 50er Batches, dann vollstaendig; Rate-Limit/Retry beibehalten).
 
 ### Next Steps (2026-02-23)
