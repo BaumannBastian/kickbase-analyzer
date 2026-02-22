@@ -311,6 +311,7 @@ kickbase-analyzer/
 - [x] LigaInsider Bronze erweitert (Lineup-Flag, Konkurrenzliste, Change-Tracking `last_changed_at`)
 - [x] Selektive private Ingestion-Sources (`--sources kickbase,ligainsider,odds`), damit Teil-Updates ohne kompletten Kickbase-Refresh moeglich sind.
 - [x] Wettquoten als dritte Bronze-Quelle (`odds_match_snapshot`) eingebunden (1. Bundesliga, H2H + Totals fuer die naechsten 9 Spiele).
+- [ ] Kickbase-Ingestion weiter aufsplitten in fachliche Refresh-Modi (z.B. `kickbase_marketvalue_daily`, `kickbase_matchday_stats`, `kickbase_lineup_status_intraday`), damit nur noetige Endpunkte je Run geladen werden.
 
 ### MVP-2 (Databricks bronze/silver/gold jobs)
 - [x] Bronze ingest job: load raw files to Delta (lokales Job-Skeleton + Lakehouse Bronze Snapshot Layout)
@@ -341,11 +342,23 @@ kickbase-analyzer/
 - [ ] Silver v0.9 umsetzen: `silver.player_snapshot` als Joined Base (Kickbase + LigaInsider, eine Zeile pro Spieler/Snapshot) mit logisch gruppierten Feature-Spalten fuer Punkte, Aufstellchance und Marktwert.
 - [ ] Silver v0.9 umsetzen: `silver.team_matchup_snapshot` (eine Zeile pro Team/naechstes Matchup) inkl. Wettquoten-basiertem wahrscheinlichsten Ergebnis und einfacher Formkurve.
 - [ ] Stabile Player-Identity in Silver finalisieren: eigener interner `player_uid` (fortlaufend), Name/Slug-Matching, persistentes Mapping, inaktive Zuordnungen historisieren.
+- [ ] Silver-Star-Schema vorbereiten: `dim_player` mit internem Surrogate-Key (`player_uid`) als zentrale PK, Source-IDs (`kickbase_player_id`, `ligainsider_player_slug/id`) nur als Mapping-Aliase halten.
 - [ ] Join-Key-Strategie Odds -> Teams/Fixtures in Silver/Gold haerten (Teamnamen-Normalisierung, Heim/Auswaerts-Mapping, QA-Checks).
+- [ ] Transfer-Intelligence vorbereiten: globale/indikative League-Transferstroeme pruefen (falls API-seitig verfuegbar), um Marktwertdynamik im Modell zu erklaeren.
 - [ ] Start model calibration (logistic/GBM).
 - [ ] MW forecast model (delta_7d).
 - [ ] Opponent/team strength features.
 - [ ] Model registry + experiment tracking.
+
+### V0.9-Plus (PostgreSQL History Store lokal)
+- [x] Docker-Setup fuer lokalen Postgres-Container + optional pgAdmin angelegt.
+- [x] Flyway-Migration fuer History-Schema (`dim_players`, `dim_event_types`, `fact_market_value`, `fact_match_performance`, `fact_match_events`, `fact_match_event_agg`, `etl_state`) angelegt.
+- [x] Python-ETL fuer idempotente/inkrementelle Writes in Postgres aufgebaut (Databricks-Driver oder CSV-Fallback).
+- [x] Smoke-Test auf Einzelspieler (z.B. Orban) gegen echte API-Daten durchgefuehrt (Marktwert + Performance + Event-Breakdown in Postgres validiert).
+- [x] Eventtype-Mapping korrigiert: `/v4/live/eventtypes` (`i`/`ti`) wird vollstaendig geparst, Event-Namen sind damit in `dim_event_types` verfuegbar.
+- [x] Match-Kontext in History erweitert: `fact_match_performance` mit `is_home` und `match_result` (`W`/`D`/`L`) fuer direkte Win/Draw/Loss-Analysen.
+- [x] Legacy-`season_label='unknown'` in Event-Facts wird beim ETL-Lauf pro Spieler bereinigt, wenn bereits ein gleiches Event fuer eine bekannte Saison existiert.
+- [ ] Danach schrittweise auf Full-Roster hochskalieren (Rate-Limit/Retry beibehalten).
 
 ### Tomorrow (2026-02-22)
 - [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.

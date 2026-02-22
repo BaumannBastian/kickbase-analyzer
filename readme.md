@@ -9,7 +9,7 @@ Local Ingestion (Kickbase API + LigaInsider + Odds API)
 -> BigQuery (RAW/CORE/MARTS)
 -> Power BI Desktop
 
-## Status (2026-02-21)
+## Status (2026-02-22)
 
 Der Bronze-Layer ist funktional:
 - `kickbase_player_snapshot`
@@ -38,6 +38,7 @@ CI ist auf `bash`-Aufruf der Skripte umgestellt, damit keine Execute-Bit-Problem
 - `docs/setup_sources_private.md`
 - `docs/setup_databricks_bigquery.md`
 - `docs/setup_powerbi_desktop.md`
+- `docs/setup_postgres_history.md`
 
 ## Quick Start (PowerShell)
 
@@ -94,6 +95,71 @@ Pro Run entstehen NDJSON-Dateien in `data/bronze/`:
 - `odds_match_snapshot_<timestamp>.ndjson`
 - `ingestion_runs.ndjson`
 
+## PostgreSQL History (Docker + Flyway + Python ETL)
+
+Ziel:
+- komplette Historie pro Spieler in lokaler Postgres DB
+- inkrementelle Updates ohne Duplikate
+- zuerst kontrolliert mit Einzelspieler testen (`--max-players 1`)
+
+### Setup (einmalig)
+
+1) Abhaengigkeiten installieren
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+2) `.env` um Postgres/Flyway/Databricks-Werte ergaenzen (Vorlage in `.env.example`)
+
+3) Datenbank starten
+
+```powershell
+docker compose up -d postgres
+docker compose ps
+```
+
+4) Schema migrieren
+
+```powershell
+./scripts/run_flyway_migrate.sh
+```
+
+### History-ETL laufen lassen
+
+Einzelspieler-Test (sicherer Start):
+
+```powershell
+python -m src.etl_history --player-name-like orban --max-players 1 --timeframe-days 3650 --days-from 1 --save-raw
+```
+
+Mehr Spieler:
+
+```powershell
+python -m src.etl_history --max-players 25 --timeframe-days 3650 --days-from 1
+```
+
+CSV-Fallback ohne Databricks Driver:
+
+```powershell
+python -m src.etl_history --players-csv .\\in\\players.csv --max-players 5 --days-from 1 --days-to 3
+```
+
+### Wichtige Tabellen im lokalen Postgres
+
+- `dim_players`
+- `dim_event_types`
+- `fact_market_value`
+- `fact_match_performance`
+- `fact_match_events`
+- `fact_match_event_agg`
+- `etl_state`
+
+Wichtige Felder:
+- `fact_market_value.mv_date`, `fact_market_value.market_value`
+- `fact_match_performance.is_home` (`true`/`false`) und `fact_match_performance.match_result` (`W`/`D`/`L`)
+- `fact_match_events.event_type_id` + Join auf `dim_event_types.name` fuer lesbare Eventnamen
+
 ## Databricks / BigQuery / Power BI
 
 Databricks Jobs lokal simulieren:
@@ -134,6 +200,10 @@ Erledigt heute:
 - [x] Bronze Viewer auf getrennte Latest-Timestamps pro Tabelle umgestellt
 - [x] CI-Fix fuer `Permission denied` bei Shell-Skripten
 - [x] README bereinigt (keine fehlerhaften ChatGPT-Referenzreste)
+- [x] PostgreSQL History Smoke-Test mit Orban erfolgreich (Market Value + Performance + Event-Breakdown)
+- [x] Eventtype-Mapping korrigiert (`/v4/live/eventtypes` mit `i/ti`) und in `dim_event_types` geladen
+- [x] Performance um `is_home` + `match_result` (`W`/`D`/`L`) erweitert
+- [x] Legacy-Events mit `season_label='unknown'` pro Spieler-Lauf automatisch bereinigt
 
 Offen fuer morgen (V0.9):
 - [ ] Bronze QA: Teamnamen-Normalisierung Odds -> Club-Mapping vorbereiten

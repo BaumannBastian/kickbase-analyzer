@@ -1,0 +1,14 @@
+# ------------------------------------
+# requirements.txt
+#
+# Laufzeit-Abhaengigkeiten fuer Postgres-History-ETL.
+#
+# Usage
+# ------------------------------------
+# - python -m pip install -r requirements.txt
+# ------------------------------------
+
+requests>=2.32.0
+python-dotenv>=1.0.1
+psycopg2-binary>=2.9.9
+databricks-sql-connector>=3.3.0

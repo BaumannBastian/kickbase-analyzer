@@ -1,0 +1,51 @@
+# ------------------------------------
+# docker-compose.yml
+#
+# Lokaler PostgreSQL-Stack fuer Kickbase-History-ETL.
+# Optional kann pgAdmin mit gestartet werden.
+#
+# Usage
+# ------------------------------------
+# - docker compose up -d postgres
+# - docker compose --profile ui up -d
+# ------------------------------------
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: kickbase-history-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-kickbase_history}
+      POSTGRES_USER: ${PGUSER:-kickbase}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-kickbase}
+    ports:
+      - "${PGPORT:-5432}:5432"
+    volumes:
+      - kickbase_history_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-kickbase} -d ${PGDATABASE:-kickbase_history}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: kickbase-history-pgadmin
+    restart: unless-stopped
+    profiles: ["ui"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - kickbase_history_pgadmin:/var/lib/pgadmin
+
+volumes:
+  kickbase_history_pgdata:
+  kickbase_history_pgadmin:

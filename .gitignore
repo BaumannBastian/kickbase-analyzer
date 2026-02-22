@@ -33,6 +33,7 @@ data/lakehouse/
 data/marts/
 data/backtesting/
 data/warehouse/
+out/
 
 # Power BI Desktop local artifacts
 dashboards/powerbi/local/**

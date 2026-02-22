@@ -10,4 +10,4 @@
 # ------------------------------------
 
 set -euo pipefail
-python3 -m compileall -q local_ingestion databricks bigquery scripts tests
+python3 -m compileall -q local_ingestion databricks bigquery scripts src tests
