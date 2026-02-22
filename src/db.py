@@ -538,42 +538,110 @@ def upsert_dim_teams(
             team_name = row["team_name"]
             ligainsider_team_url = row["ligainsider_team_url"]
 
-            if team_code is not None:
-                cur.execute(
-                    """
-                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (league_key, team_code)
-                    DO UPDATE SET
-                        team_uid = EXCLUDED.team_uid,
-                        kickbase_team_id = COALESCE(EXCLUDED.kickbase_team_id, dim_team.kickbase_team_id),
-                        team_name = COALESCE(EXCLUDED.team_name, dim_team.team_name),
-                        ligainsider_team_url = COALESCE(EXCLUDED.ligainsider_team_url, dim_team.ligainsider_team_url),
-                        updated_at = now()
-                    RETURNING team_uid, (xmax = 0) AS inserted
-                    """,
-                    (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url),
-                )
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (league_key, kickbase_team_id)
-                    DO UPDATE SET
-                        team_uid = EXCLUDED.team_uid,
-                        team_name = COALESCE(EXCLUDED.team_name, dim_team.team_name),
-                        ligainsider_team_url = COALESCE(EXCLUDED.ligainsider_team_url, dim_team.ligainsider_team_url),
-                        updated_at = now()
-                    RETURNING team_uid, (xmax = 0) AS inserted
-                    """,
-                    (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url),
-                )
+            cur.execute(
+                """
+                INSERT INTO dim_team (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING team_uid
+                """,
+                (team_uid, league_key, kickbase_team_id, team_code, team_name, ligainsider_team_url),
+            )
+            inserted_row = cur.fetchone()
 
-            team_uid, inserted_flag = cur.fetchone()
-            inserted_total += 1 if bool(inserted_flag) else 0
-            updated_total += 0 if bool(inserted_flag) else 1
-            team_uid_text = str(team_uid)
+            if inserted_row is not None:
+                inserted_total += 1
+                team_uid_text = str(inserted_row[0])
+            else:
+                if kickbase_team_id is not None and team_code is not None:
+                    cur.execute(
+                        """
+                        SELECT team_uid
+                        FROM dim_team
+                        WHERE league_key = %s
+                          AND (kickbase_team_id = %s OR team_code = %s)
+                        ORDER BY CASE WHEN kickbase_team_id = %s THEN 0 ELSE 1 END
+                        LIMIT 1
+                        """,
+                        (league_key, kickbase_team_id, team_code, kickbase_team_id),
+                    )
+                elif kickbase_team_id is not None:
+                    cur.execute(
+                        """
+                        SELECT team_uid
+                        FROM dim_team
+                        WHERE league_key = %s
+                          AND kickbase_team_id = %s
+                        LIMIT 1
+                        """,
+                        (league_key, kickbase_team_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT team_uid
+                        FROM dim_team
+                        WHERE league_key = %s
+                          AND team_code = %s
+                        LIMIT 1
+                        """,
+                        (league_key, team_code),
+                    )
+
+                existing = cur.fetchone()
+                if existing is None:
+                    continue
+
+                team_uid_text = str(existing[0])
+                cur.execute(
+                    """
+                    UPDATE dim_team
+                    SET
+                        kickbase_team_id = CASE
+                            WHEN kickbase_team_id IS NULL
+                             AND %s IS NOT NULL
+                             AND NOT EXISTS (
+                                 SELECT 1
+                                 FROM dim_team other
+                                 WHERE other.league_key = dim_team.league_key
+                                   AND other.kickbase_team_id = %s
+                                   AND other.team_uid <> dim_team.team_uid
+                             )
+                            THEN %s
+                            ELSE kickbase_team_id
+                        END,
+                        team_code = CASE
+                            WHEN team_code IS NULL
+                             AND %s IS NOT NULL
+                             AND NOT EXISTS (
+                                 SELECT 1
+                                 FROM dim_team other
+                                 WHERE other.league_key = dim_team.league_key
+                                   AND other.team_code = %s
+                                   AND other.team_uid <> dim_team.team_uid
+                             )
+                            THEN %s
+                            ELSE team_code
+                        END,
+                        team_name = COALESCE(%s, team_name),
+                        ligainsider_team_url = COALESCE(ligainsider_team_url, %s),
+                        updated_at = now()
+                    WHERE team_uid = %s
+                    """,
+                    (
+                        kickbase_team_id,
+                        kickbase_team_id,
+                        kickbase_team_id,
+                        team_code,
+                        team_code,
+                        team_code,
+                        team_name,
+                        ligainsider_team_url,
+                        team_uid_text,
+                    ),
+                )
+                updated_total += 1
+
             if kickbase_team_id is not None:
                 by_kickbase_team_id[int(kickbase_team_id)] = team_uid_text
             if team_code is not None:

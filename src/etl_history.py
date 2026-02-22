@@ -1739,27 +1739,46 @@ def _collect_team_rows(
     perf_rows: list[dict[str, Any]],
     team_code_by_team_id: dict[int, str],
     team_name_by_team_id: dict[int, str] | None = None,
+    ligainsider_team_url: str | None = None,
 ) -> list[dict[str, Any]]:
     rows_by_key: dict[tuple[int | None, str | None], dict[str, Any]] = {}
 
-    def _add(kickbase_team_id: int | None, team_code: str | None, team_name: str | None) -> None:
+    def _add(
+        kickbase_team_id: int | None,
+        team_code: str | None,
+        team_name: str | None,
+        *,
+        row_ligainsider_team_url: str | None = None,
+    ) -> None:
         normalized_code = _normalize_team_code(team_code)
         if normalized_code is None and kickbase_team_id is not None:
             normalized_code = DEFAULT_TEAM_CODE_BY_KICKBASE_TEAM_ID.get(kickbase_team_id)
         if kickbase_team_id is None and normalized_code is None:
+            return
+        key = (kickbase_team_id, normalized_code)
+        existing = rows_by_key.get(key)
+        if existing is not None:
+            if row_ligainsider_team_url and not existing.get("ligainsider_team_url"):
+                existing["ligainsider_team_url"] = row_ligainsider_team_url
             return
         display_name = _format_team_display_name(
             team_code=normalized_code,
             team_name=team_name,
             fallback_name=DEFAULT_TEAM_FULL_NAME_BY_CODE.get(normalized_code) if normalized_code else None,
         )
-        rows_by_key[(kickbase_team_id, normalized_code)] = {
+        rows_by_key[key] = {
             "kickbase_team_id": kickbase_team_id,
             "team_code": normalized_code,
             "team_name": display_name,
+            "ligainsider_team_url": row_ligainsider_team_url,
         }
 
-    _add(player.kickbase_team_id, player.team_code, player.team_name)
+    _add(
+        player.kickbase_team_id,
+        player.team_code,
+        player.team_name,
+        row_ligainsider_team_url=ligainsider_team_url,
+    )
 
     for team_id, code in team_code_by_team_id.items():
         dynamic_name = None
@@ -2216,7 +2235,8 @@ def main(argv: list[str] | None = None) -> int:
                 player=player,
                 perf_rows=perf_rows,
                 team_code_by_team_id=team_code_by_team_id,
-                team_name_by_team_id=team_name_by_team_id,
+            team_name_by_team_id=team_name_by_team_id,
+                ligainsider_team_url=_to_text_or_none(enrichment.get("ligainsider_team_url")),
             )
             team_lookup, teams_inserted, teams_updated = upsert_dim_teams(
                 conn,
