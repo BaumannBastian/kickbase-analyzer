@@ -10,4 +10,5 @@
 # ------------------------------------
 
 set -euo pipefail
+"$(dirname "$0")/bootstrap_bq_auth.sh" "$@"
 python3 -m bigquery.core_transform.apply_ml_views_with_bq_cli "$@"

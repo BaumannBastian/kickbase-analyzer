@@ -15,6 +15,7 @@
 
 set -euo pipefail
 export PATH="$HOME/bin:$PATH"
+"$(dirname "$0")/bootstrap_bq_auth.sh" "$@"
 
 python3 -m bigquery.raw_load.prepare_raw_exports "$@"
 python3 -m bigquery.raw_load.load_raw_with_bq_cli "$@"

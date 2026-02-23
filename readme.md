@@ -52,6 +52,14 @@ CI ist auf `bash`-Aufruf der Skripte umgestellt, damit keine Execute-Bit-Problem
 - `docs/setup_postgres_history.md`
 - `docs/ml_workflow.md`
 
+## Quick Start (Bash / WSL)
+
+```bash
+cd "/mnt/c/Users/basti/Documents/Kickbase Analyzer"
+python3 -m pip install -e .
+python3 -m pip install -r requirements-ml.txt
+```
+
 ## Quick Start (PowerShell)
 
 ```powershell
@@ -220,6 +228,22 @@ Databricks Jobs lokal simulieren:
 ```powershell
 ./scripts/run_databricks_jobs_demo.sh
 ```
+
+BigQuery Auth-Setup fuer Bash/WSL (einmalig pro Session oder via Service Account):
+
+```bash
+# Option A: vorhandenes gcloud Login verwenden
+./scripts/bigquery/bootstrap_bq_auth.sh --env-file .env --project kickbase-analyzer
+
+# Option B: Service Account in .env setzen
+# BQ_PROJECT_ID=kickbase-analyzer
+# BQ_SERVICE_ACCOUNT_KEY_FILE=/mnt/c/Users/<user>/keys/kickbase-sa.json
+./scripts/bigquery/bootstrap_bq_auth.sh --env-file .env
+```
+
+Hinweis:
+- Alle `run_*_bq.sh` Wrapper rufen `bootstrap_bq_auth.sh` automatisch auf.
+- Dadurch sind BigQuery-Runs direkt aus Bash/WSL moeglich, ohne PowerShell-Aliasse.
 
 BigQuery Pipeline:
 

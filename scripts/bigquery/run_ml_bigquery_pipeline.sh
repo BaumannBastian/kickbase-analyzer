@@ -14,4 +14,5 @@
 # ------------------------------------
 
 set -euo pipefail
+"$(dirname "$0")/bootstrap_bq_auth.sh" "$@"
 python3 -m scripts.ml.run_ml_bigquery_pipeline "$@"

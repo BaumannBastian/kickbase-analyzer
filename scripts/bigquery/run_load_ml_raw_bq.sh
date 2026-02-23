@@ -11,4 +11,5 @@
 # ------------------------------------
 
 set -euo pipefail
+"$(dirname "$0")/bootstrap_bq_auth.sh" "$@"
 python3 -m bigquery.raw_load.load_ml_with_bq_cli "$@"

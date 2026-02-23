@@ -14,5 +14,6 @@
 
 set -euo pipefail
 export PATH="$HOME/bin:$PATH"
+"$(dirname "$0")/bootstrap_bq_auth.sh" "$@"
 
 python3 -m scripts.bigquery.run_history_bigquery_pipeline "$@"
