@@ -61,3 +61,43 @@ shared mart_ml_model_monitoring =
             otherwise DatasetData{[Name = "mart_ml_model_monitoring", Kind = "Table"]}[Data]
     in
         viewOrTable;
+
+shared mart_hist_player_profile =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_hist_player_profile", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_hist_player_profile", Kind = "Table"]}[Data]
+    in
+        viewOrTable;
+
+shared mart_hist_player_marketvalue_curve =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_hist_player_marketvalue_curve", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_hist_player_marketvalue_curve", Kind = "Table"]}[Data]
+    in
+        viewOrTable;
+
+shared mart_hist_player_match_breakdown =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_hist_player_match_breakdown", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_hist_player_match_breakdown", Kind = "Table"]}[Data]
+    in
+        viewOrTable;
+
+shared mart_hist_player_comparison =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_hist_player_comparison", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_hist_player_comparison", Kind = "Table"]}[Data]
+    in
+        viewOrTable;
+
+shared mart_hist_team_outlook =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_hist_team_outlook", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_hist_team_outlook", Kind = "Table"]}[Data]
+    in
+        viewOrTable;

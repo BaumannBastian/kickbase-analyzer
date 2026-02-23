@@ -219,11 +219,20 @@ Local scheduler (cron/Task Scheduler/APScheduler) triggert Local ingestion → s
 
 ### History-Replikation (final)
 - Kein blindes 1:1 Kopieren der gesamten Postgres-RAW-History nach BigQuery.
-- V0.9 Scope fuer BigQuery:
+- Selektiver Scope fuer BigQuery:
   - Gold-Outputs (aktuell)
   - ML-Outputs (`ml_*`)
-- Postgres-History bleibt Source-of-Truth fuer tiefe historische Analysen/Training;
-  nur spaeter gezielt einzelne History-Views in BigQuery, wenn konkrete BI-Frage es braucht.
+  - aus Postgres nur reduzierte Reporting-History:
+    - `hist_player_profile_snapshot`
+    - `hist_team_snapshot`
+    - `hist_player_marketvalue_daily`
+    - `hist_player_match_summary`
+    - `hist_player_match_components`
+  - aus Bronze nur aktuelle Team-Snapshots:
+    - `hist_team_lineup_players`
+    - `hist_team_odds_snapshot`
+- Postgres bleibt Source-of-Truth fuer komplette RAW-History inkl. Event-Granularitaet;
+  BigQuery erhaelt nur Reporting-relevante Teilmengen.
 
 ### Binary-Policy (final)
 - Spielerbilder (`image_blob`/`BYTEA`) bleiben ausschliesslich lokal in Postgres.
@@ -402,7 +411,8 @@ kickbase-analyzer/
 - [ ] Event-Parser fuer Sonderfaelle haerten, bei denen `fact_player_event` trotz vorhandenem `points_total` nur 0-/Meta-Events liefert.
 - [ ] HTML-Parser-Haertung fuer LigaInsider: entscheiden, ob Regex-Parser auf `BeautifulSoup` migriert werden soll (Wartbarkeit/Robustheit vs. Runtime).
 - [x] Data-Serving-Entscheid finalisiert: BigQuery als Reporting-Warehouse fuer Power BI mit Inputs aus Databricks Gold + ML + selektiver Postgres-History.
-- [x] History-Replikation definiert: kein blindes 1:1 Postgres-RAW nach BigQuery; initial nur Gold + ML, History spaeter selektiv nach BI-Use-Case.
+- [x] History-Replikation umgesetzt: selektiver Postgres/Bronze-Export nach BigQuery RAW (`hist_*`) statt 1:1 Dump der gesamten History.
+- [x] History CORE/MARTS Views fuer Reporting angelegt (`v_hist_*`, `mart_hist_player_profile`, `mart_hist_player_marketvalue_curve`, `mart_hist_player_match_breakdown`, `mart_hist_player_comparison`, `mart_hist_team_outlook`).
 - [x] Binary-Policy festgezogen: Spielerbilder (`BYTEA`) bleiben lokal; nach BigQuery nur Bildmetadaten + Pfad/Hash.
 
 ### V1.0 (Data Quality + Modeling Upgrade)

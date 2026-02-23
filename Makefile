@@ -6,7 +6,7 @@
 
 PYTHON ?= python3
 
-.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting run-ml-pipeline run-ml-scheduler install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-bq-ml-export run-bq-ml-load run-bq-ml-views run-bq-ml-pipeline run-powerbi-desktop-pack
+.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting run-ml-pipeline run-ml-scheduler install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-bq-ml-export run-bq-ml-load run-bq-ml-views run-bq-ml-pipeline run-bq-history-export run-bq-history-load run-bq-history-views run-bq-history-pipeline run-powerbi-desktop-pack
 
 test:
 	./scripts/test.sh
@@ -85,6 +85,18 @@ run-bq-ml-views:
 
 run-bq-ml-pipeline:
 	./scripts/bigquery/run_ml_bigquery_pipeline.sh
+
+run-bq-history-export:
+	./scripts/bigquery/run_prepare_history_exports.sh
+
+run-bq-history-load:
+	./scripts/bigquery/run_load_history_bq.sh
+
+run-bq-history-views:
+	./scripts/bigquery/run_apply_history_views_bq.sh
+
+run-bq-history-pipeline:
+	./scripts/bigquery/run_history_bigquery_pipeline.sh
 
 run-powerbi-desktop-pack:
 	./scripts/run_powerbi_desktop_pack.sh

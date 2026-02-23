@@ -229,6 +229,20 @@ BigQuery Pipeline:
 ./scripts/bigquery/run_apply_views_bq.sh --project <gcp_project_id>
 ```
 
+Selektive History fuer Player-Profile (Postgres + Bronze -> BQ):
+
+```powershell
+./scripts/bigquery/run_prepare_history_exports.sh --env-file .env
+./scripts/bigquery/run_load_history_bq.sh --project <gcp_project_id>
+./scripts/bigquery/run_apply_history_views_bq.sh --project <gcp_project_id>
+```
+
+Oder als End-to-End Lauf:
+
+```powershell
+./scripts/bigquery/run_history_bigquery_pipeline.sh --env-file .env --project <gcp_project_id>
+```
+
 ML -> BigQuery RAW + ML Views:
 
 ```powershell
@@ -286,6 +300,22 @@ BigQuery ML RAW Export-Dateien:
 - `data/warehouse/raw_ml/ml_cv_fold_metrics.jsonl`
 - `data/warehouse/raw_ml/ml_champion_selection.jsonl`
 - `data/warehouse/raw_ml/ml_run_summary.jsonl`
+
+BigQuery History RAW Export-Dateien:
+- `data/warehouse/raw_history/hist_player_profile_snapshot.jsonl`
+- `data/warehouse/raw_history/hist_team_snapshot.jsonl`
+- `data/warehouse/raw_history/hist_player_marketvalue_daily.jsonl`
+- `data/warehouse/raw_history/hist_player_match_summary.jsonl`
+- `data/warehouse/raw_history/hist_player_match_components.jsonl`
+- `data/warehouse/raw_history/hist_team_lineup_players.jsonl`
+- `data/warehouse/raw_history/hist_team_odds_snapshot.jsonl`
+
+History MARTS Views (Power BI):
+- `mart_hist_player_profile`
+- `mart_hist_player_marketvalue_curve`
+- `mart_hist_player_match_breakdown`
+- `mart_hist_player_comparison`
+- `mart_hist_team_outlook`
 
 ## Roadmap (Kurz)
 

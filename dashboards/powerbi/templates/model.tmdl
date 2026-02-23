@@ -50,5 +50,21 @@ createOrReplace
 				)
 			)
 
+	ref table mart_hist_player_profile
+		measure 'Hist Players' = DISTINCTCOUNT(mart_hist_player_profile[player_uid])
+		measure 'Hist Avg Age' = AVERAGE(mart_hist_player_profile[player_age_years])
+		measure 'Hist Total Current Market Value' = SUM(mart_hist_player_profile[current_market_value])
+
+	ref table mart_hist_player_comparison
+		measure 'Hist Avg Last 5 Points' = AVERAGE(mart_hist_player_comparison[avg_points_last_5])
+		measure 'Hist Avg Last 10 Points' = AVERAGE(mart_hist_player_comparison[avg_points_last_10])
+
+	ref table mart_hist_player_marketvalue_curve
+		measure 'Hist Marketvalue Data Points' = COUNTROWS(mart_hist_player_marketvalue_curve)
+
+	ref table mart_hist_team_outlook
+		measure 'Hist Teams With Outlook' = DISTINCTCOUNT(mart_hist_team_outlook[team_uid])
+		measure 'Hist Avg Team Win Probability' = AVERAGE(mart_hist_team_outlook[team_win_implied_prob])
+
 	annotation TemplateProject = "{project}"
 	annotation TemplateMartsDataset = "{marts}"

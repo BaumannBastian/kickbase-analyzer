@@ -93,3 +93,31 @@ MAXX(
         mart_ml_model_monitoring[sklearn_points_total_rmse]
     )
 )
+
+-- Tabelle: mart_hist_player_profile
+[Hist Players] =
+DISTINCTCOUNT(mart_hist_player_profile[player_uid])
+
+[Hist Avg Age] =
+AVERAGE(mart_hist_player_profile[player_age_years])
+
+[Hist Total Current Market Value] =
+SUM(mart_hist_player_profile[current_market_value])
+
+-- Tabelle: mart_hist_player_comparison
+[Hist Avg Last 5 Points] =
+AVERAGE(mart_hist_player_comparison[avg_points_last_5])
+
+[Hist Avg Last 10 Points] =
+AVERAGE(mart_hist_player_comparison[avg_points_last_10])
+
+-- Tabelle: mart_hist_player_marketvalue_curve
+[Hist Marketvalue Data Points] =
+COUNTROWS(mart_hist_player_marketvalue_curve)
+
+-- Tabelle: mart_hist_team_outlook
+[Hist Teams With Outlook] =
+DISTINCTCOUNT(mart_hist_team_outlook[team_uid])
+
+[Hist Avg Team Win Probability] =
+AVERAGE(mart_hist_team_outlook[team_win_implied_prob])
