@@ -272,6 +272,9 @@ Erledigt heute:
 Offen fuer morgen (V0.9):
 - [ ] Kickbase-Ingestion-Frequenzen entkoppeln (Marktwert taeglich, Performance an Spieltagen, Status/Lineup intraday).
 - [ ] Bronze QA: Teamnamen-Normalisierung Odds -> Club-Mapping vorbereiten
+- [ ] BigQuery-Rolle final festziehen: Welche Tabellen aus Postgres-History + Databricks Gold + ML als Reporting-Layer gebraucht werden.
+- [ ] BigQuery-Loadpfad fuer History definieren (Postgres -> BigQuery RAW_HISTORY/CORE) ohne Datenverdopplung.
+- [ ] Bildstrategie dokumentieren: `image_blob` bleibt nur lokal in Postgres; in BigQuery nur Metadaten (`player_uid`, `image_mime`, `image_sha256`, `image_local_path`).
 - [ ] Event-Parser fuer Sonderfaelle haerten (`event_points_total=0` bei vorhandenen Match-Punkten) und Datenquelle gegen Kickbase-UI gegentesten
 - [ ] Konsistenzcheck als festen Gate-Step in den Batch-Runner integrieren (Warnung/Abbruch bei groesseren Abweichungen)
 - [ ] Silver Tabelle `player_snapshot` bauen (nur Sammeln/Joinen, noch keine Modelllogik)

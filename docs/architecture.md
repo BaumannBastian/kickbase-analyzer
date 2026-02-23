@@ -386,6 +386,10 @@ kickbase-analyzer/
 - [x] Post-Load-Dedupe auf bestehende Eventdaten angewendet (Duplikate mit gleicher Source-Event-ID bereinigt).
 - [ ] Konsistenzcheck als Pflicht-Gate im Batch-Runner verankern (derzeit als separates QA-Skript).
 - [ ] Event-Parser fuer Sonderfaelle haerten, bei denen `fact_player_event` trotz vorhandenem `points_total` nur 0-/Meta-Events liefert.
+- [ ] HTML-Parser-Haertung fuer LigaInsider: entscheiden, ob Regex-Parser auf `BeautifulSoup` migriert werden soll (Wartbarkeit/Robustheit vs. Runtime).
+- [ ] Data-Serving-Entscheid finalisieren: BigQuery als Reporting-Warehouse fuer Power BI mit Inputs aus Databricks Gold + ML + selektiver Postgres-History.
+- [ ] History-Replikation definieren: welche Postgres-RAW-History-Tabellen in BigQuery gebraucht werden (nicht blind 1:1 alles kopieren).
+- [ ] Binary-Policy festziehen: Spielerbilder (`BYTEA`) nicht nach BigQuery laden; nur Bildmetadaten + Pfad/Hash fuer Join/Referenz.
 
 ### Next Steps (2026-02-23)
 - [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.
