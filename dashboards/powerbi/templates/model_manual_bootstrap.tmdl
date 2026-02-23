@@ -1,0 +1,79 @@
+// ------------------------------------
+// model_manual_bootstrap.tmdl
+//
+// Versionierter TMDL-Stand fuer den manuellen Power-BI-Bootstrap.
+// Fokus: Measures fuer MARTS Tabellen.
+// ------------------------------------
+
+createOrReplace
+
+	ref table mart_player_leaderboard
+		measure 'Players' = DISTINCTCOUNT(mart_player_leaderboard[player_uid])
+		measure 'Avg Expected Points' = AVERAGE(mart_player_leaderboard[expected_points_next_matchday])
+		measure 'Avg Start Probability' = AVERAGE(mart_player_leaderboard[start_probability])
+		measure 'Avg Value Score' = AVERAGE(mart_player_leaderboard[value_score])
+		measure 'Total Market Value' = SUM(mart_player_leaderboard[market_value])
+		measure 'Avg Expected MV Delta 7d' = AVERAGE(mart_player_leaderboard[expected_marketvalue_change_7d])
+
+	ref table mart_points_breakdown
+		measure 'Total Predicted Points' = SUM(mart_points_breakdown[pred_total])
+		measure 'Total Base EV' = SUM(mart_points_breakdown[base_raw_ev])
+		measure 'Total Scorer EV' = SUM(mart_points_breakdown[scorer_ev])
+		measure 'Total Win EV' = SUM(mart_points_breakdown[win_ev])
+		measure 'Total Minutes EV' = SUM(mart_points_breakdown[minutes_bonus_ev])
+		measure 'Total Cards EV' = SUM(mart_points_breakdown[cards_negative_ev])
+
+	ref table mart_risk_overview
+		measure 'Avg P_DNP' = AVERAGE(mart_risk_overview[p_dnp])
+		measure 'Avg StdDev Points' = AVERAGE(mart_risk_overview[stddev_points])
+		measure 'Avg P90 Minus P10' = AVERAGEX(mart_risk_overview, mart_risk_overview[p90_points] - mart_risk_overview[p10_points])
+
+	ref table mart_ml_player_predictions
+		measure 'ML Players' = DISTINCTCOUNT(mart_ml_player_predictions[player_uid])
+		measure 'ML Avg Expected Points Next' = AVERAGE(mart_ml_player_predictions[expected_points_next_match])
+		measure 'ML Avg Start Probability' = AVERAGE(mart_ml_player_predictions[start_probability])
+		measure 'ML Avg Sub Probability' = AVERAGE(mart_ml_player_predictions[sub_probability])
+		measure 'ML Avg Expected Minutes' = AVERAGE(mart_ml_player_predictions[expected_minutes])
+		measure 'ML Avg Raw Points Next' = AVERAGE(mart_ml_player_predictions[expected_raw_points_next_match])
+		measure 'ML Avg OnTop Points Next' = AVERAGE(mart_ml_player_predictions[expected_on_top_points_next_match])
+		measure 'Profile Expected Points Next Match' = AVERAGE(mart_ml_player_predictions[expected_points_next_match])
+		measure 'Profile Start Probability' = AVERAGE(mart_ml_player_predictions[start_probability])
+		measure 'Profile Sub Probability' = AVERAGE(mart_ml_player_predictions[sub_probability])
+		measure 'Profile Expected Minutes' = AVERAGE(mart_ml_player_predictions[expected_minutes])
+		measure 'Profile Raw Points Next' = AVERAGE(mart_ml_player_predictions[expected_raw_points_next_match])
+		measure 'Profile OnTop Points Next' = AVERAGE(mart_ml_player_predictions[expected_on_top_points_next_match])
+
+	ref table mart_ml_model_monitoring
+		measure 'ML Latest Run TS' = MAX(mart_ml_model_monitoring[ml_run_ts])
+		measure 'ML Latest RMSE Champion' =
+			VAR latestRun = MAX(mart_ml_model_monitoring[ml_run_ts])
+			RETURN MAXX(
+				FILTER(mart_ml_model_monitoring, mart_ml_model_monitoring[ml_run_ts] = latestRun),
+				IF(
+					mart_ml_model_monitoring[champion_model] = "torch",
+					mart_ml_model_monitoring[torch_points_total_rmse],
+					mart_ml_model_monitoring[sklearn_points_total_rmse]
+				)
+			)
+
+	ref table mart_hist_player_profile
+		measure 'Hist Players' = DISTINCTCOUNT(mart_hist_player_profile[player_uid])
+		measure 'Hist Avg Age' = AVERAGE(mart_hist_player_profile[player_age_years])
+		measure 'Hist Total Current Market Value' = SUM(mart_hist_player_profile[current_market_value])
+		measure 'Profile Current Market Value' = MAX(mart_hist_player_profile[current_market_value])
+
+	ref table mart_hist_player_comparison
+		measure 'Hist Avg Last 5 Points' = AVERAGE(mart_hist_player_comparison[avg_points_last_5])
+		measure 'Hist Avg Last 10 Points' = AVERAGE(mart_hist_player_comparison[avg_points_last_10])
+		measure 'Profile Avg Last 5' = AVERAGE(mart_hist_player_comparison[avg_points_last_5])
+
+	ref table mart_hist_player_marketvalue_curve
+		measure 'Hist Marketvalue Data Points' = COUNTROWS(mart_hist_player_marketvalue_curve)
+
+	ref table mart_hist_team_outlook
+		measure 'Hist Teams With Outlook' = DISTINCTCOUNT(mart_hist_team_outlook[team_uid])
+		measure 'Hist Avg Team Win Probability' = AVERAGE(mart_hist_team_outlook[team_win_implied_prob])
+		measure 'Profile Team Win Probability' = AVERAGE(mart_hist_team_outlook[team_win_implied_prob])
+
+	annotation TemplateProject = "kickbase-analyzer"
+	annotation TemplateMartsDataset = "kickbase_marts"

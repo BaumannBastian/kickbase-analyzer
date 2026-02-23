@@ -49,3 +49,6 @@ dashboards/powerbi/**/*.pbit
 .DS_Store
 .vscode/
 .idea/
+
+# Local docs (not versioned)
+docs/local/**
