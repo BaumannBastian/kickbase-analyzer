@@ -74,10 +74,12 @@ Erwartung:
 - `status = success`
 - `row_count > 0`
 
-Wichtig: Die LigaInsider Homepage (`https://www.ligainsider.de/`) enthaelt nicht die benoetigten Team-Aufstellungsdaten im erwarteten Format.
+Wichtig: Die LigaInsider Homepage (`https://www.ligainsider.de/`) enthaelt nicht die benoetigten Team-/Spielerdaten im erwarteten Format.
 Nutze Team-Aufstellungsseiten wie z. B.:
 - `https://www.ligainsider.de/fc-bayern-muenchen/1/`
 - `https://www.ligainsider.de/borussia-dortmund/14/`
+
+Der Scraper erweitert jede konfigurierte Team-URL automatisch um die passende Kader-URL (`.../kader/`), damit neben der Aufstellung auch die vollere Kaderliste (inkl. LI-ID/Birthdate/Bildquelle) erfasst wird.
 
 ## 4) Private Ingestion ausfuehren
 

@@ -12,6 +12,7 @@
 # ------------------------------------
 # - python -m src.etl_history --players-csv ./in/players.csv --max-players 1
 # - python -m src.etl_history --max-players 25 --days-from 1
+# - python -m src.etl_history --players-csv ./in/players.csv --player-offset 50 --max-players 50
 # - python -m src.etl_history --players-csv ./in/players.csv --export-dir ./out/postgres_export
 # ------------------------------------
 
@@ -184,6 +185,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--league-id", default=os.getenv("KICKBASE_LEAGUE_ID", ""))
     parser.add_argument("--league-key", default=os.getenv("KICKBASE_LEAGUE_KEY", "bundesliga_1"))
     parser.add_argument("--max-players", type=int, default=None)
+    parser.add_argument(
+        "--player-offset",
+        type=int,
+        default=0,
+        help="Optionaler Startoffset nach Sortierung (fuer Batch-Ladevorgaenge).",
+    )
     parser.add_argument(
         "--player-id",
         type=int,
@@ -396,6 +403,9 @@ def select_players(players: list[PlayerMaster], args: argparse.Namespace) -> lis
 
     out = sorted(out, key=lambda player: (player.player_name.lower(), player.player_uid))
 
+    if args.player_offset is not None and args.player_offset > 0:
+        out = out[args.player_offset :]
+
     if args.max_players is not None and args.max_players > 0:
         out = out[: args.max_players]
 
@@ -501,12 +511,16 @@ def resolve_player_enrichment(
 
     li_row = _resolve_ligainsider_row_for_player(player, ligainsider_lookup)
     if li_row is not None:
+        if birthdate is None:
+            birthdate = _parse_date(_first_present(li_row, ["birthdate", "player_birthdate"]))
         if not ligainsider_slug:
             ligainsider_slug = _to_text_or_none(li_row.get("ligainsider_player_slug"))
         if ligainsider_player_id is None:
             ligainsider_player_id = _to_int(li_row.get("ligainsider_player_id"))
         if ligainsider_name is None:
             ligainsider_name = _to_text_or_none(_first_present(li_row, ["player_name", "name"]))
+        if ligainsider_profile_url is None:
+            ligainsider_profile_url = _to_text_or_none(li_row.get("ligainsider_profile_url"))
         ligainsider_team_url = _to_text_or_none(li_row.get("source_url"))
         if image_url is None:
             image_url = _normalize_image_url(
@@ -1492,18 +1506,32 @@ def _build_event_hash(
     source_event_id: str | None,
     event_index: int,
 ) -> str:
-    raw = "|".join(
-        [
-            str(player_uid),
-            match_uid,
-            str(event_type_id),
-            str(points),
-            "" if mt is None else str(mt),
-            "" if att is None else att,
-            "" if source_event_id is None else source_event_id,
-            str(event_index),
-        ]
-    )
+    # Prefer stable API event ids when available so repeated ingestions
+    # do not duplicate the same logical event due changing list positions.
+    if source_event_id:
+        raw = "|".join(
+            [
+                str(player_uid),
+                match_uid,
+                str(event_type_id),
+                str(points),
+                "" if mt is None else str(mt),
+                "" if att is None else att,
+                source_event_id,
+            ]
+        )
+    else:
+        raw = "|".join(
+            [
+                str(player_uid),
+                match_uid,
+                str(event_type_id),
+                str(points),
+                "" if mt is None else str(mt),
+                "" if att is None else att,
+                str(event_index),
+            ]
+        )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
@@ -1651,6 +1679,10 @@ def _normalize_image_url(value: str | None) -> str | None:
 
     if text.startswith("//"):
         return f"https:{text}"
+
+    if text.startswith("/") and "/images/player/" in text:
+        ligainsider_base_url = os.getenv("LIGAINSIDER_BASE_URL", "https://www.ligainsider.de").rstrip("/") + "/"
+        return urljoin(ligainsider_base_url, text.lstrip("/"))
 
     base_url = os.getenv("KICKBASE_CONTENT_BASE_URL", "https://api.kickbase.com/").rstrip("/") + "/"
     return urljoin(base_url, text.lstrip("/"))
@@ -1916,12 +1948,14 @@ def main(argv: list[str] | None = None) -> int:
         from src.db import (
             DbConfig,
             cleanup_competition_scope,
+            cleanup_event_duplicates_by_source_id,
             ensure_season,
             export_player_images,
             export_raw_tables_to_csv,
             get_connection,
             get_existing_player_identity,
             get_max_market_value_date,
+            get_state,
             insert_fact_player_events,
             merge_player_identity,
             purge_history_outside_window,
@@ -1994,6 +2028,7 @@ def main(argv: list[str] | None = None) -> int:
         "scope_cleaned_bridge_player_team": 0,
         "scope_cleaned_dim_team": 0,
         "scope_cleaned_dim_player_team_uid": 0,
+        "scope_cleaned_event_duplicates_by_source_id": 0,
         "earliest_marketvalue_date": None,
         "latest_marketvalue_date": None,
         "csv_exports": [],
@@ -2098,6 +2133,7 @@ def main(argv: list[str] | None = None) -> int:
         summary["scope_cleaned_bridge_player_team"] += scope_cleanup.get("bridge_player_team", 0)
         summary["scope_cleaned_dim_team"] += scope_cleanup.get("dim_team", 0)
         summary["scope_cleaned_dim_player_team_uid"] += scope_cleanup.get("dim_player_team_uid", 0)
+        summary["scope_cleaned_event_duplicates_by_source_id"] += cleanup_event_duplicates_by_source_id(conn)
 
         set_state(conn, "last_eventtypes_sync_ts", datetime.now(UTC).isoformat().replace("+00:00", "Z"))
         conn.commit()
@@ -2422,7 +2458,14 @@ def main(argv: list[str] | None = None) -> int:
             summary["player_match_updated"] += updated_fpm
 
             known_event_type_ids = {int(row["event_type_id"]) for row in event_types}
-            for day_number in range(args.days_from, days_to + 1):
+            state_key = f"last_matchday_processed_{league_key}_{active_season_label}_{resolved_player_uid}"
+            start_day = int(args.days_from)
+            last_processed_raw = get_state(conn, state_key)
+            last_processed_day = _to_int(last_processed_raw)
+            if last_processed_day is not None and last_processed_day >= start_day:
+                start_day = last_processed_day + 1
+
+            for day_number in range(start_day, days_to + 1):
                 playercenter_payload = client.get_playercenter(
                     token,
                     player_competition_id,
@@ -2472,7 +2515,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             set_state(
                 conn,
-                f"last_matchday_processed_{league_key}_{active_season_label}_{resolved_player_uid}",
+                state_key,
                 str(days_to),
             )
 
@@ -2490,6 +2533,7 @@ def main(argv: list[str] | None = None) -> int:
         summary["scope_cleaned_bridge_player_team"] += scope_cleanup.get("bridge_player_team", 0)
         summary["scope_cleaned_dim_team"] += scope_cleanup.get("dim_team", 0)
         summary["scope_cleaned_dim_player_team_uid"] += scope_cleanup.get("dim_player_team_uid", 0)
+        summary["scope_cleaned_event_duplicates_by_source_id"] += cleanup_event_duplicates_by_source_id(conn)
         conn.commit()
 
         should_export_tables = bool(args.export_tables)

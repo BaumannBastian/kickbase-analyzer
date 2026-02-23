@@ -9,12 +9,16 @@ Local Ingestion (Kickbase API + LigaInsider + Odds API)
 -> BigQuery (RAW/CORE/MARTS)
 -> Power BI Desktop
 
-## Status (2026-02-22)
+## Status (2026-02-23)
 
 Der Bronze-Layer ist funktional:
 - `kickbase_player_snapshot`
 - `ligainsider_status_snapshot`
 - `odds_match_snapshot`
+
+LigaInsider-Snapshots sind erweitert:
+- Team-Aufstellungsseiten (`/<team>/<id>/`) fuer Lineup/Positionskonkurrenz
+- Team-Kaderseiten (`/<team>/<id>/kader/`) fuer vollere Spielerabdeckung inkl. LI-ID, Birthdate, Bild-Quelle
 
 PostgreSQL History ist aktiv:
 - source-unabhaengiger `player_uid` in allen spielerbezogenen Facts
@@ -94,6 +98,12 @@ Bronze-Tabellen anzeigen:
 python -m scripts.analysis.show_bronze_tables --input-dir data/bronze --limit 20
 ```
 
+Driver-CSV aus Kickbase-Bronze erzeugen (fuer History-Batches):
+
+```powershell
+python -m scripts.history.build_players_csv_from_bronze --input-dir data/bronze --output in/players_all.csv
+```
+
 ## Bronze Outputs
 
 Pro Run entstehen NDJSON-Dateien in `data/bronze/`:
@@ -146,6 +156,12 @@ Mehr Spieler:
 python -m src.etl_history --max-players 25 --timeframe-days 3650 --days-from 1
 ```
 
+Batch-Load (kontrolliert, mit Offset):
+
+```powershell
+python -m scripts.history.run_history_batches --env-file .env --players-csv in/players_all.csv --batch-size 50
+```
+
 CSV-Fallback ohne Databricks Driver:
 
 ```powershell
@@ -156,6 +172,13 @@ Backfill fehlender Player-Enrichment-Felder + Problemreport:
 
 ```powershell
 python -m scripts.history.backfill_player_enrichment --env-file .env --report-dir out/reports
+```
+
+Raw-Konsistenzcheck (`points_total` vs Event-Summe):
+
+```powershell
+python -m scripts.history.check_match_points_consistency --env-file .env --limit 25
+python -m scripts.history.check_match_points_consistency --env-file .env --player-name-like amiri
 ```
 
 ### Wichtige Tabellen im lokalen Postgres
@@ -221,7 +244,7 @@ python -m scripts.powerbi_desktop.export_desktop_assets --project <gcp_project_i
   - Features fuer Startet/Punkte/Marktwert in getrennten, klaren Feature-Sets
   - Modellierung + Kalibrierung + Backtesting-Haertung
 
-## Morgen To-do (2026-02-22)
+## To-do morgen (2026-02-23)
 
 Erledigt heute:
 - [x] Selektive Ingestion pro Quelle (`kickbase`, `ligainsider`, `odds`, `all`)
@@ -238,15 +261,25 @@ Erledigt heute:
 - [x] Teamnamen auf Anzeigeformat `RBL (RB Leipzig)` standardisiert und Bildspeicherung auf `BYTEA` umgestellt
 - [x] LigaInsider-Enrichment gehaertet (Name/Slug/Last-Name-Fallback), Birthdates fuer 5er-Testload gezogen und `player_uid`-Merges auf `YYYYMMDD` validiert
 - [x] Bildpfad in DB auf lokalen Dateipfad umgestellt (`dim_player.image_local_path`) statt externer URL
+- [x] LigaInsider-Ingestion auf Team-Kaderseiten erweitert (`.../kader/`), dadurch vollere LI-Spielerabdeckung in Bronze
+- [x] History-ETL um Batch-Offset erweitert (`--player-offset`) und Batch-Runner-Skript ergaenzt
+- [x] Konsistenzcheck-Skript fuer `fact_player_match` vs `fact_player_event` hinzugefuegt
+- [x] Full-Roster-Historyload in 50er-Batches abgeschlossen (`337/337` Driver-Zeilen verarbeitet)
+- [x] Event-Dedupe gehaertet (stabile API-Event-ID bevorzugt) und bestehende Duplikate bereinigt
+- [x] `dim_team.ligainsider_team_url` auf Team-Root-URLs normalisiert (kein `/kader/`-Mix)
+- [x] Artefakt-Cleanup: lokale Batch-CSV-Artefakte aus Git entfernt (`in/players_5.csv`, `in/players_all.csv` ignored)
 
 Offen fuer morgen (V0.9):
 - [ ] Kickbase-Ingestion-Frequenzen entkoppeln (Marktwert taeglich, Performance an Spieltagen, Status/Lineup intraday).
 - [ ] Bronze QA: Teamnamen-Normalisierung Odds -> Club-Mapping vorbereiten
+- [ ] Event-Parser fuer Sonderfaelle haerten (`event_points_total=0` bei vorhandenen Match-Punkten) und Datenquelle gegen Kickbase-UI gegentesten
+- [ ] Konsistenzcheck als festen Gate-Step in den Batch-Runner integrieren (Warnung/Abbruch bei groesseren Abweichungen)
 - [ ] Silver Tabelle `player_snapshot` bauen (nur Sammeln/Joinen, noch keine Modelllogik)
 - [ ] Silver Tabelle `team_matchup_snapshot` bauen
 - [ ] Persistente `player_uid`-Vergabe mit Mapping-Historie aufsetzen
 - [ ] Databricks Bronze Job so erweitern, dass Odds-only Runs ohne KB/LI-Timestamp-Konflikt ingestiert werden
 - [ ] Erste Gold-Spezifikation fuer drei Targets finalisieren (spielt, punkte, marktwert)
+- [ ] LigaInsider-Restfaelle (ohne Match im Snapshot) mit Search/Profile-Fallback weiter reduzieren; offene Faelle bleiben im JSONL-Report dokumentiert
 
 ## Tests
 

@@ -2,6 +2,15 @@
 # test_ligainsider_scraper.py
 #
 # Tests fuer LigaInsider-Scraper Parsing, Retry und Snapshot-Abruf.
+#
+# Outputs
+# ------------------------------------
+# 1) Kein Dateioutput; Assertions fuer Parser-/HTTP-Verhalten.
+#
+# Usage
+# ------------------------------------
+# - python -m unittest tests.test_ligainsider_scraper
+# - pytest tests/test_ligainsider_scraper.py
 # ------------------------------------
 
 from __future__ import annotations
@@ -167,6 +176,46 @@ class LigaInsiderScraperTests(unittest.TestCase):
         self.assertEqual(by_slug["leonidas-stergiou"]["competition_player_count"], 1)
         self.assertEqual(by_slug["marnon-busch"]["competition_player_names"], ["Stergiou"])
         self.assertEqual(by_slug["marnon-busch"]["competition_player_count"], 1)
+
+    def test_parse_rows_from_kader_page_markup(self) -> None:
+        html_text = """
+        <div class="leg_column_row">
+          <div class="player_img">
+            <a href="/manuel-neuer_114/">
+              <img src="https://cdn.ligainsider.de/images/player/team/minor/manuel-neuer.jpg" alt="Manuel Neuer" />
+            </a>
+          </div>
+          <small>27.03.1986</small>
+        </div>
+        <div class="leg_column_row">
+          <div class="player_img">
+            <a href="/jonas-urbig_26101/">
+              <img src="/images/player/team/minor/jonas-urbig.jpg" alt="Jonas Urbig" />
+            </a>
+          </div>
+          <small>08.08.2003</small>
+        </div>
+        """
+        rows = LigaInsiderScraper.parse_squad_rows(
+            html_text,
+            page_url="https://www.ligainsider.de/fc-bayern-muenchen/1/kader/",
+        )
+        self.assertEqual(len(rows), 2)
+        by_slug = {str(row["ligainsider_player_slug"]): row for row in rows}
+
+        self.assertEqual(by_slug["manuel-neuer"]["predicted_lineup"], "unknown")
+        self.assertEqual(by_slug["manuel-neuer"]["birthdate"], "27.03.1986")
+        self.assertEqual(
+            by_slug["manuel-neuer"]["ligainsider_profile_url"],
+            "https://www.ligainsider.de/manuel-neuer_114/",
+        )
+        self.assertIn("player_image_url", by_slug["manuel-neuer"])
+
+        self.assertEqual(by_slug["jonas-urbig"]["birthdate"], "08.08.2003")
+        self.assertEqual(
+            by_slug["jonas-urbig"]["player_image_url"],
+            "https://www.ligainsider.de/images/player/team/minor/jonas-urbig.jpg",
+        )
 
 
 if __name__ == "__main__":

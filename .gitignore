@@ -36,6 +36,7 @@ data/warehouse/
 data/history/
 .cache/
 out/
+in/players_*.csv
 
 # Power BI Desktop local artifacts
 dashboards/powerbi/local/**

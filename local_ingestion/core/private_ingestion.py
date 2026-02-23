@@ -131,6 +131,66 @@ def load_latest_dataset_snapshot(out_dir: Path, dataset_name: str) -> list[dict[
     return rows
 
 
+def _ligainsider_row_key(row: dict[str, Any]) -> tuple[str, str]:
+    slug = str(row.get("ligainsider_player_slug", "")).strip().lower()
+    name = str(row.get("player_name", "")).strip().lower()
+    if slug:
+        return (f"slug:{slug}", "")
+    return ("", name)
+
+
+def _is_empty_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value) == 0
+    return False
+
+
+def _merge_competitor_names(current: Any, incoming: Any) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for source in (current, incoming):
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            text = str(item).strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(text)
+    return values
+
+
+def _merge_ligainsider_row_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in incoming.items():
+        if key == "competition_player_names":
+            merged[key] = _merge_competitor_names(merged.get(key), value)
+            continue
+        if key in {"predicted_lineup", "status", "competition_risk"}:
+            current_text = str(merged.get(key, "")).strip().lower()
+            incoming_text = str(value).strip().lower()
+            if current_text in {"", "unknown"} and incoming_text not in {"", "unknown"}:
+                merged[key] = value
+            continue
+        if _is_empty_value(merged.get(key)) and not _is_empty_value(value):
+            merged[key] = value
+
+    competitors = _merge_competitor_names(
+        merged.get("competition_player_names"),
+        incoming.get("competition_player_names"),
+    )
+    merged["competition_player_names"] = competitors
+    merged["competition_player_count"] = len(competitors)
+    return merged
+
+
 def _build_kickbase_rows(
     config: PrivateIngestionConfig,
     cache: JsonFileCache,
@@ -253,22 +313,22 @@ def _build_ligainsider_rows(
             cache_ttl_seconds=config.cache_ttl_seconds,
             transport=ligainsider_transport,
         )
-        ligainsider_rows = []
-        seen_keys: set[tuple[str, str]] = set()
+        row_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for raw_url in str(config.ligainsider_status_url).split(","):
             url = raw_url.strip()
             if not url:
                 continue
-            rows_for_url = ligainsider_scraper.fetch_status_snapshot(url)
-            for row in rows_for_url:
-                key = (
-                    str(row.get("ligainsider_player_slug", "")).strip().lower(),
-                    str(row.get("player_name", "")).strip().lower(),
-                )
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                ligainsider_rows.append(row)
+            status_rows = ligainsider_scraper.fetch_status_snapshot(url)
+            squad_rows = ligainsider_scraper.fetch_squad_snapshot(url)
+
+            for row in [*status_rows, *squad_rows]:
+                key = _ligainsider_row_key(row)
+                existing = row_by_key.get(key)
+                if existing is None:
+                    row_by_key[key] = dict(row)
+                else:
+                    row_by_key[key] = _merge_ligainsider_row_fields(existing, row)
+        ligainsider_rows = list(row_by_key.values())
     else:
         ligainsider_rows = []
 

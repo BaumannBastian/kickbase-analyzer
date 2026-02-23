@@ -527,7 +527,9 @@ def upsert_dim_teams(
             "team_code": team_code,
             "team_uid": _build_team_uid(team_code=team_code, kickbase_team_id=kickbase_team_id),
             "team_name": team_name,
-            "ligainsider_team_url": _to_text_or_none(row.get("ligainsider_team_url")),
+            "ligainsider_team_url": _normalize_ligainsider_team_url(
+                _to_text_or_none(row.get("ligainsider_team_url"))
+            ),
         }
 
     with conn.cursor() as cur:
@@ -684,7 +686,8 @@ def set_dim_team_ligainsider_url(
     team_uid: str | None,
     ligainsider_team_url: str | None,
 ) -> None:
-    if not team_uid or not ligainsider_team_url:
+    normalized_url = _normalize_ligainsider_team_url(ligainsider_team_url)
+    if not team_uid or not normalized_url:
         return
     with conn.cursor() as cur:
         cur.execute(
@@ -694,7 +697,7 @@ def set_dim_team_ligainsider_url(
                 updated_at = now()
             WHERE team_uid = %s
             """,
-            (ligainsider_team_url, str(team_uid)),
+            (normalized_url, str(team_uid)),
         )
 
 
@@ -921,6 +924,37 @@ def insert_fact_player_events(conn: PgConnection, rows: Sequence[dict[str, Any]]
     with conn.cursor() as cur:
         inserted = execute_values(cur, sql, values, fetch=True)
     return len(inserted)
+
+
+def cleanup_event_duplicates_by_source_id(conn: PgConnection) -> int:
+    """Remove duplicated events that share the same stable source event id."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    event_hash,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            player_uid,
+                            match_uid,
+                            event_type_id,
+                            points,
+                            COALESCE(mt, -1),
+                            COALESCE(att, ''),
+                            NULLIF(COALESCE(raw_event->>'ei', raw_event->>'event_id', raw_event->>'id'), '')
+                        ORDER BY ingested_at DESC, event_hash DESC
+                    ) AS rn
+                FROM fact_player_event
+                WHERE NULLIF(COALESCE(raw_event->>'ei', raw_event->>'event_id', raw_event->>'id'), '') IS NOT NULL
+            )
+            DELETE FROM fact_player_event AS f
+            USING ranked
+            WHERE f.event_hash = ranked.event_hash
+              AND ranked.rn > 1
+            """
+        )
+        return cur.rowcount
 
 
 def get_state(conn: PgConnection, key: str) -> str | None:
@@ -1274,6 +1308,34 @@ def _to_text_or_none(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalize_ligainsider_team_url(value: str | None) -> str | None:
+    text = _to_text_or_none(value)
+    if text is None:
+        return None
+    if "ligainsider.de" not in text:
+        return text
+
+    normalized = text.strip()
+    if normalized.startswith("http://"):
+        normalized = "https://" + normalized[len("http://") :]
+    if not normalized.startswith("https://"):
+        return normalized
+
+    prefix = "https://www.ligainsider.de"
+    if normalized.startswith(prefix):
+        path = normalized[len(prefix):]
+    else:
+        return normalized
+
+    # Keep canonical team page URL; strip optional /kader/ and query fragments.
+    path = path.split("?", 1)[0].split("#", 1)[0]
+    if "/kader/" in path:
+        path = path.split("/kader/", 1)[0] + "/"
+    if not path.endswith("/"):
+        path += "/"
+    return prefix + path
 
 
 def _to_bool_or_none(value: Any) -> bool | None:

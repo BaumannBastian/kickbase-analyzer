@@ -378,7 +378,14 @@ kickbase-analyzer/
 - [x] 50-Spieler-Batchload erfolgreich gefahren (inkl. Images, Marktwerte, Match/Events) und Laufzeit/API-Rate validiert.
 - [x] Competition-Scope-Cleanup aktiviert: `dim_team` auf Bundesliga-Teams begrenzt und nicht-Competition-Matches/Facts aus `dim_match`/`fact_player_match` entfernt.
 - [x] Backfill-Skript fuer fehlende `dim_player`-Enrichment-Felder gebaut inkl. JSONL-Issue-Report fuer manuelle Nacharbeit.
-- [ ] LigaInsider-Backfill erweitern: fehlende Spieler ohne Snapshot-Match ueber Team-Kaderseiten/Suche aufloesen (aktuell verbleiben offene Problemfaelle im Report).
+- [x] LigaInsider-Snapshot erweitert: pro Team werden jetzt Aufstellungsseite **und** `.../kader/` geparst (vollere Kaderabdeckung inkl. LI-ID, Birthdate, Bild-URL).
+- [x] Player-Enrichment-Backfill nach LI-Kader-Erweiterung erneut gelaufen; offene Problemfaelle stark reduziert (Issue-Report bleibt als manueller Fallback aktiv).
+- [ ] LigaInsider-Fallback fuer Restfaelle weiter haerten (Suche/Profil-Fallback fuer Einzelfaelle ohne Kader-Match, aktuell z.B. 1 offener Report-Fall).
+- [x] Full-Load-Strategie umgesetzt: kontrollierte Batches (5 -> 50 -> Rest in 50ern) inkl. Resume-Offset und API-Rate-Monitoring gefahren (`337/337` Driver verarbeitet).
+- [x] Event-Dedupe gehaertet: `fact_player_event.event_hash` nutzt stabile Source-Event-ID (falls vorhanden) statt positionsabhaengigem Index.
+- [x] Post-Load-Dedupe auf bestehende Eventdaten angewendet (Duplikate mit gleicher Source-Event-ID bereinigt).
+- [ ] Konsistenzcheck als Pflicht-Gate im Batch-Runner verankern (derzeit als separates QA-Skript).
+- [ ] Event-Parser fuer Sonderfaelle haerten, bei denen `fact_player_event` trotz vorhandenem `points_total` nur 0-/Meta-Events liefert.
 
 ### Next Steps (2026-02-23)
 - [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.

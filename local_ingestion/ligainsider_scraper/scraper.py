@@ -25,6 +25,7 @@ import re
 import time
 from typing import Any, Protocol
 from urllib import error, request
+from urllib.parse import urlsplit, urlunsplit, urljoin
 
 from local_ingestion.core.cache import JsonFileCache
 from local_ingestion.core.config import RetryConfig
@@ -57,6 +58,11 @@ PLAYER_NAME_LINK_RE = re.compile(
 )
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 ALT_ATTR_RE = re.compile(r'alt="(?P<alt>[^"]+)"', flags=re.IGNORECASE)
+IMG_SRC_RE = re.compile(
+    r'<img[^>]+src=["\'](?P<src>[^"\']+)["\']',
+    flags=re.IGNORECASE,
+)
+BIRTHDATE_RE = re.compile(r"\b(?P<date>\d{2}\.\d{2}\.\d{4})\b")
 
 
 @dataclass(frozen=True)
@@ -139,6 +145,33 @@ class LigaInsiderScraper:
             out = dict(row)
             out["scraped_at"] = scraped_at
             out["source_url"] = status_url
+            normalized.append(out)
+
+        if self.cache is not None:
+            self.cache.set(cache_key, normalized)
+
+        return normalized
+
+    def fetch_squad_snapshot(self, team_url: str) -> list[dict[str, Any]]:
+        squad_url = self._derive_squad_url(team_url)
+        if squad_url is None:
+            return []
+
+        cache_key = f"ligainsider_squad:{squad_url}"
+        if self.cache is not None:
+            cached = self.cache.get(cache_key, ttl_seconds=self.cache_ttl_seconds)
+            if cached is not None:
+                return self._coerce_rows(cached)
+
+        html_text = self._request_html(method="GET", url=squad_url)
+        rows = self.parse_squad_rows(html_text, page_url=squad_url)
+        scraped_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            out = dict(row)
+            out["scraped_at"] = scraped_at
+            out["source_url"] = squad_url
             normalized.append(out)
 
         if self.cache is not None:
@@ -315,6 +348,53 @@ class LigaInsiderScraper:
         return rows
 
     @classmethod
+    def parse_squad_rows(cls, html_text: str, *, page_url: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen_slugs: set[str] = set()
+
+        row_blocks = cls._extract_div_blocks(html_text, '<div class="leg_column_row"')
+        if not row_blocks:
+            return []
+
+        for block in row_blocks:
+            link = PLAYER_LINK_RE.search(block)
+            if link is None:
+                continue
+
+            slug = link.group("slug").strip().lower()
+            player_id = link.group("pid").strip()
+            name = cls._extract_name_from_link_body(link.group("body"))
+            if not name:
+                name = cls._name_from_slug(slug)
+            if not slug or slug in seen_slugs:
+                continue
+            seen_slugs.add(slug)
+
+            profile_url = urljoin(page_url, f"/{slug}_{player_id}/")
+            image_url = cls._extract_player_image_from_fragment(block=block, page_url=page_url)
+            birthdate = cls._extract_birthdate_from_fragment(block)
+
+            row: dict[str, Any] = {
+                "ligainsider_player_slug": slug,
+                "ligainsider_player_id": player_id,
+                "player_name": name,
+                "status": "unknown",
+                "predicted_lineup": "unknown",
+                "competition_risk": "unknown",
+                "competition_player_names": [],
+                "competition_player_count": 0,
+                "ligainsider_profile_url": profile_url,
+            }
+            if image_url is not None:
+                row["player_image_url"] = image_url
+            if birthdate is not None:
+                row["birthdate"] = birthdate
+
+            rows.append(row)
+
+        return rows
+
+    @classmethod
     def _parse_position_rows_with_competitors(
         cls, *, fragment: str, lineup: str
     ) -> list[dict[str, Any]]:
@@ -471,6 +551,49 @@ class LigaInsiderScraper:
         if not words:
             return ""
         return " ".join(word.capitalize() for word in words)
+
+    @staticmethod
+    def _extract_player_image_from_fragment(*, block: str, page_url: str) -> str | None:
+        for match in IMG_SRC_RE.finditer(block):
+            src = html.unescape(match.group("src").strip())
+            if not src:
+                continue
+            if "/images/player/" not in src and "player/team" not in src:
+                continue
+            return urljoin(page_url, src)
+        return None
+
+    @staticmethod
+    def _extract_birthdate_from_fragment(block: str) -> str | None:
+        match = BIRTHDATE_RE.search(block)
+        if match is None:
+            return None
+        return match.group("date")
+
+    @staticmethod
+    def _derive_squad_url(team_url: str) -> str | None:
+        try:
+            parsed = urlsplit(team_url.strip())
+        except ValueError:
+            return None
+
+        if not parsed.scheme or not parsed.netloc:
+            return None
+
+        path = parsed.path or "/"
+        if path.endswith("/kader/"):
+            clean_path = path
+        elif "/kader/" in path:
+            clean_path = path[: path.index("/kader/") + len("/kader/")]
+        elif "/kaderanalyse/" in path:
+            clean_path = path.replace("/kaderanalyse/", "/kader/")
+        elif re.search(r"/[^/]+/\d+/?$", path):
+            clean_path = path if path.endswith("/") else path + "/"
+            clean_path = clean_path + "kader/"
+        else:
+            return None
+
+        return urlunsplit((parsed.scheme, parsed.netloc, clean_path, "", ""))
 
     @classmethod
     def _to_row_candidate(cls, node: dict[str, Any]) -> dict[str, Any] | None:
