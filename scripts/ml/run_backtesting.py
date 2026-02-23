@@ -74,6 +74,23 @@ def _collect_latest_rows_by_key(
     return latest_by_key
 
 
+def _collect_latest_player_snapshot_rows(dataset_dir: Path) -> dict[tuple[str, str], dict[str, Any]]:
+    files = sorted(dataset_dir.glob("snapshot_*.ndjson"))
+    if not files:
+        raise FileNotFoundError(f"No snapshot files found under {dataset_dir}")
+
+    latest_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for path in files:
+        rows = read_ndjson(path)
+        for row in rows:
+            player_uid = str(row.get("player_uid", "")).strip()
+            if not player_uid:
+                continue
+            matchday = str(_to_int(row.get("last_matchday"), 0))
+            latest_by_key[(player_uid, matchday)] = row
+    return latest_by_key
+
+
 def _compute_metric_rows(error_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not error_rows:
         return []
@@ -110,16 +127,13 @@ def run_backtesting(
     out_dir: Path,
 ) -> dict[str, Any]:
     pred_dir = lakehouse_gold_dir / "feat_player_matchday"
-    actual_dir = lakehouse_silver_dir / "fct_player_match"
+    actual_dir = lakehouse_silver_dir / "player_snapshot"
 
     pred_rows = _collect_latest_rows_by_key(
         pred_dir,
         key_fields=("player_uid", "matchday"),
     )
-    actual_rows = _collect_latest_rows_by_key(
-        actual_dir,
-        key_fields=("player_uid", "matchday"),
-    )
+    actual_rows = _collect_latest_player_snapshot_rows(actual_dir)
 
     errors: list[dict[str, Any]] = []
     for key, pred in pred_rows.items():
@@ -128,7 +142,10 @@ def run_backtesting(
             continue
 
         pred_points = _to_float(pred.get("expected_points_next_matchday"), 0.0)
-        actual_points = _to_float(actual.get("raw_points"), 0.0)
+        actual_points = _to_float(
+            actual.get("last_match_points"),
+            _to_float(actual.get("average_points"), 0.0),
+        )
 
         errors.append(
             {

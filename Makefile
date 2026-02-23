@@ -6,7 +6,7 @@
 
 PYTHON ?= python3
 
-.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-powerbi-desktop-pack
+.PHONY: test lint format run-demo-ingestion run-private-ingestion run-scheduler run-kickbase-auth-check run-kickbase-league-discovery run-ligainsider-scrape-check run-databricks-jobs-demo run-build-marts-local run-pipeline-demo run-backtesting run-ml-pipeline run-ml-scheduler install-gcloud-cli configure-gcloud-auth check-bq-setup run-bq-raw-export run-bq-load run-bq-views run-bq-pipeline run-bq-ml-export run-bq-ml-load run-bq-ml-views run-bq-ml-pipeline run-powerbi-desktop-pack
 
 test:
 	./scripts/test.sh
@@ -47,6 +47,12 @@ run-pipeline-demo:
 run-backtesting:
 	./scripts/run_backtesting.sh
 
+run-ml-pipeline:
+	./scripts/run_ml_bigquery_pipeline.sh
+
+run-ml-scheduler:
+	./scripts/run_ml_scheduler.sh
+
 install-gcloud-cli:
 	./scripts/bigquery/install_gcloud_cli_wsl.sh
 
@@ -67,6 +73,18 @@ run-bq-views:
 
 run-bq-pipeline:
 	./scripts/bigquery/run_bigquery_pipeline.sh
+
+run-bq-ml-export:
+	./scripts/bigquery/run_prepare_ml_exports.sh
+
+run-bq-ml-load:
+	./scripts/bigquery/run_load_ml_raw_bq.sh
+
+run-bq-ml-views:
+	./scripts/bigquery/run_apply_ml_views_bq.sh
+
+run-bq-ml-pipeline:
+	./scripts/bigquery/run_ml_bigquery_pipeline.sh
 
 run-powerbi-desktop-pack:
 	./scripts/run_powerbi_desktop_pack.sh

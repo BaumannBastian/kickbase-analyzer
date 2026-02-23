@@ -22,7 +22,7 @@ Reproduzierbare Desktop-Dashboard-Arbeit ohne Power-BI-Service-API:
 
 ## Struktur
 - `templates/bigquery_marts_queries.pq`
-  M-Queries fuer MARTS-Views (`mart_player_leaderboard`, `mart_points_breakdown`, `mart_risk_overview`, `mart_marketvalue_dashboard`)
+  M-Queries fuer MARTS-Views (`mart_player_leaderboard`, `mart_points_breakdown`, `mart_risk_overview`, `mart_marketvalue_dashboard`, `mart_ml_player_predictions`, `mart_ml_model_monitoring`)
 - `templates/measures.dax`
   Basis-Measures fuer KPI Cards und Visuals
 - `templates/model.tmdl`
@@ -33,6 +33,7 @@ Reproduzierbare Desktop-Dashboard-Arbeit ohne Power-BI-Service-API:
 ## Empfohlener Ablauf
 1) BigQuery MARTS aktualisieren:
    `python -m bigquery.core_transform.apply_views_with_bq_cli --project kickbase-analyzer`
+   `python -m bigquery.core_transform.apply_ml_views_with_bq_cli --project kickbase-analyzer`
 2) Desktop-Pack exportieren:
    `python -m scripts.powerbi_desktop.export_desktop_assets --project kickbase-analyzer`
 3) In Power BI Desktop:
@@ -40,4 +41,3 @@ Reproduzierbare Desktop-Dashboard-Arbeit ohne Power-BI-Service-API:
    - Measures aus `measures.dax` in die jeweiligen Tabellen eintragen.
 4) Optional:
    - PBIP-Projekt lokal in `dashboards/powerbi/local/` speichern.
-

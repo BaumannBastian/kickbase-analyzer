@@ -74,10 +74,10 @@ Orchestrierung:
 ### Step C — Local ML & Analysis
 - Gold-Tabellen werden lokal geladen (Parquet/Delta export oder Connector)
 - Training/Backtesting/Inference lokal (scikit-learn / PyTorch)
-- Predictions/Components werden als Tabellen exportiert
+- Predictions/Components werden lokal als Tabellen exportiert (kein Write-back nach Databricks Gold)
 
 ### Step D — BigQuery Data Warehouse: RAW → CORE → MARTS
-- Upload Predictions + ausgewählte Gold Tables in BigQuery RAW
+- Upload lokaler ML-Predictions + ausgewaehlter Gold-Outputs in BigQuery RAW
 - Transformation in CORE (typisiert/standardisiert, Dimensions/Facts)
 - MARTS: Power-BI-ready Views/Tables (Leaderboard, Breakdown, Risk, MW curves)
 
@@ -105,17 +105,15 @@ Common columns:
 
 ### 4.2 Silver (Sync + Identity + Cleaning)
 Ziel: Quellen zusammenbringen.
-- silver.dim_player (player_uid, canonical_name, position, team_uid, …)
-- silver.map_player_source (player_uid ↔ kickbase_id ↔ ligainsider_slug)
-- silver.fct_player_daily (daily canonical snapshot: market_value, status, …)
-- silver.fct_player_match (match-level canonical stats/events)
+- silver.player_snapshot (eine Zeile pro Spieler/Snapshot; Kickbase + LigaInsider in einem Datensatz)
+- silver.team_matchup_snapshot (eine Zeile pro Team fuer naechstes Matchup; Odds + wahrscheinliche Aufstellung)
 
 Key: player_uid als intern stabiler Identifier.
 
 Identity Strategy:
-- deterministic match (IDs/slug)
-- fallback fuzzy match (name + team + position)
-- manueller Override-Layer: silver.player_identity_overrides
+- deterministic match (Name + Birthdate -> `player_uid`)
+- fallback matching (Name/Slug + Teamkontext)
+- spaeterer Override-Layer bleibt optional fuer Sonderfaelle
 
 ### 4.3 Gold (Analytics/ML-ready)
 Ziel: Power-BI-ready + Feature Store.
@@ -187,18 +185,53 @@ Local scheduler (cron/Task Scheduler/APScheduler) triggert Local ingestion → s
 ### RAW
 - 1:1 Upload von ML Outputs + ausgewählten Gold Tables
 - Minimal transformations (nur ingestion metadata)
+- ML RAW Tabellen:
+  - `ml_live_predictions`
+  - `ml_cv_fold_metrics`
+  - `ml_champion_selection`
+  - `ml_run_summary`
 
 ### CORE
 - typisierte Facts/Dims
 - standardisierte Keys (player_uid, team_uid, season, matchday)
 - Datums-/Zeitnormierung
 - Slowly-changing dims optional
+- ML CORE Views:
+  - `v_ml_live_predictions`
+  - `v_ml_cv_fold_metrics`
+  - `v_ml_champion_selection`
+  - `v_ml_run_summary`
 
 ### MARTS (Power BI ready)
 - mart_player_leaderboard (Value Score ranking, filterbar)
 - mart_points_breakdown (Komponenten-Table, perfekt für stacked bars)
 - mart_risk_overview (p10/p90/stddev/p_dnp)
 - mart_marketvalue_dashboard (curve + deltas + current)
+- mart_ml_player_predictions (Champion-Output je Spieler fuer naechstes Spiel)
+- mart_ml_model_monitoring (CV/Champion Monitoring je ML-Run)
+
+### Serving-Entscheid (final)
+- BigQuery ist der zentrale Reporting-Layer fuer Power BI.
+- Inputs fuer BigQuery kommen aus:
+  - Databricks Gold (aktuelle analytische Features)
+  - lokalem ML-Output (Predictions, CV, Champion)
+  - selektiver Postgres-History (nur falls fuer Reporting wirklich benoetigt)
+
+### History-Replikation (final)
+- Kein blindes 1:1 Kopieren der gesamten Postgres-RAW-History nach BigQuery.
+- V0.9 Scope fuer BigQuery:
+  - Gold-Outputs (aktuell)
+  - ML-Outputs (`ml_*`)
+- Postgres-History bleibt Source-of-Truth fuer tiefe historische Analysen/Training;
+  nur spaeter gezielt einzelne History-Views in BigQuery, wenn konkrete BI-Frage es braucht.
+
+### Binary-Policy (final)
+- Spielerbilder (`image_blob`/`BYTEA`) bleiben ausschliesslich lokal in Postgres.
+- Nach BigQuery gehen nur Bildmetadaten:
+  - `player_uid`
+  - `image_mime`
+  - `image_sha256`
+  - `image_local_path`
 
 ---
 
@@ -332,25 +365,6 @@ kickbase-analyzer/
 - [x] Power BI Desktop Asset-Pack (M/DAX/TMDL Templates + Export Script)
 - [ ] Power BI dashboards v0 (leaderboard + breakdown + MW + risk)
 
-### V1.0 (Data Quality + Modeling Upgrade)
-- [x] Kickbase Feldmapping validieren (`smc` vs `ismc`) und `average_minutes` korrekt auf Einsaetzen statt Starts berechnen (inkl. Guard gegen Division durch 0).
-- [x] Kickbase `team_id` Mapping in Team-Dimension ueberfuehrt (`kickbase_team_id` -> canonical `team_uid` + Anzeige-Name); historische Legacy-IDs sind nun auf stabile Teamkuerzel normalisiert.
-- [ ] Kickbase-Ingestion-Frequenzen entkoppeln: eigener Mode fuer Marktwert (taeglich 22:04), Performance/Stats (Spieltage) und Status/Lineup (mehrfach taeglich), um API-Calls zu minimieren.
-- [ ] Marktwert-Historie in Bronze vervollstaendigen: 10-Tage-Tuples pro Spieler, `market_value_high_365d`, `market_value_low_365d` aus echter Historie statt Current-Value-Fallback.
-- [ ] Fallback-Strategie fuer Marktwert-Historie implementieren, falls kein dedizierter API-Endpunkt verfuegbar ist (Historisierung aus taeglichen Snapshots).
-- [x] LigaInsider Konkurrenz-Extraktion auf UI-Logik umstellen: Positions-Kandidaten ueber den gruennen Pfeil/Carousel pro Spieler erfassen.
-- [x] LigaInsider Felder `competition_player_count` und `competition_player_names` gegen die echte Positionskonkurrenz validieren (Regression-Tests + Sample-basierte QA).
-- [ ] Silver v0.9 umsetzen: `silver.player_snapshot` als Joined Base (Kickbase + LigaInsider, eine Zeile pro Spieler/Snapshot) mit logisch gruppierten Feature-Spalten fuer Punkte, Aufstellchance und Marktwert.
-- [ ] Silver v0.9 umsetzen: `silver.team_matchup_snapshot` (eine Zeile pro Team/naechstes Matchup) inkl. Wettquoten-basiertem wahrscheinlichsten Ergebnis und einfacher Formkurve.
-- [ ] Stabile Player-Identity in Silver finalisieren: eigener interner `player_uid` (fortlaufend), Name/Slug-Matching, persistentes Mapping, inaktive Zuordnungen historisieren.
-- [ ] Silver-Star-Schema vorbereiten: `dim_player` mit internem Surrogate-Key (`player_uid`) als zentrale PK, Source-IDs (`kickbase_player_id`, `ligainsider_player_slug/id`) nur als Mapping-Aliase halten.
-- [ ] Join-Key-Strategie Odds -> Teams/Fixtures in Silver/Gold haerten (Teamnamen-Normalisierung, Heim/Auswaerts-Mapping, QA-Checks).
-- [ ] Transfer-Intelligence vorbereiten: globale/indikative League-Transferstroeme pruefen (falls API-seitig verfuegbar), um Marktwertdynamik im Modell zu erklaeren.
-- [ ] Start model calibration (logistic/GBM).
-- [ ] MW forecast model (delta_7d).
-- [ ] Opponent/team strength features.
-- [ ] Model registry + experiment tracking.
-
 ### V0.9-Plus (PostgreSQL History Store lokal)
 - [x] Docker-Setup fuer lokalen Postgres-Container + optional pgAdmin angelegt.
 - [x] Flyway-Migration fuer History-Schema (`dim_player`, `dim_event_type`, `dim_team`, `dim_match`, `fact_market_value_daily`, `fact_player_match`, `fact_player_event`, `etl_state`) angelegt.
@@ -387,9 +401,28 @@ kickbase-analyzer/
 - [ ] Konsistenzcheck als Pflicht-Gate im Batch-Runner verankern (derzeit als separates QA-Skript).
 - [ ] Event-Parser fuer Sonderfaelle haerten, bei denen `fact_player_event` trotz vorhandenem `points_total` nur 0-/Meta-Events liefert.
 - [ ] HTML-Parser-Haertung fuer LigaInsider: entscheiden, ob Regex-Parser auf `BeautifulSoup` migriert werden soll (Wartbarkeit/Robustheit vs. Runtime).
-- [ ] Data-Serving-Entscheid finalisieren: BigQuery als Reporting-Warehouse fuer Power BI mit Inputs aus Databricks Gold + ML + selektiver Postgres-History.
-- [ ] History-Replikation definieren: welche Postgres-RAW-History-Tabellen in BigQuery gebraucht werden (nicht blind 1:1 alles kopieren).
-- [ ] Binary-Policy festziehen: Spielerbilder (`BYTEA`) nicht nach BigQuery laden; nur Bildmetadaten + Pfad/Hash fuer Join/Referenz.
+- [x] Data-Serving-Entscheid finalisiert: BigQuery als Reporting-Warehouse fuer Power BI mit Inputs aus Databricks Gold + ML + selektiver Postgres-History.
+- [x] History-Replikation definiert: kein blindes 1:1 Postgres-RAW nach BigQuery; initial nur Gold + ML, History spaeter selektiv nach BI-Use-Case.
+- [x] Binary-Policy festgezogen: Spielerbilder (`BYTEA`) bleiben lokal; nach BigQuery nur Bildmetadaten + Pfad/Hash.
+
+### V1.0 (Data Quality + Modeling Upgrade)
+- [x] Kickbase Feldmapping validieren (`smc` vs `ismc`) und `average_minutes` korrekt auf Einsaetzen statt Starts berechnen (inkl. Guard gegen Division durch 0).
+- [x] Kickbase `team_id` Mapping in Team-Dimension ueberfuehrt (`kickbase_team_id` -> canonical `team_uid` + Anzeige-Name); historische Legacy-IDs sind nun auf stabile Teamkuerzel normalisiert.
+- [ ] Kickbase-Ingestion-Frequenzen entkoppeln: eigener Mode fuer Marktwert (taeglich 22:04), Performance/Stats (Spieltage) und Status/Lineup (mehrfach taeglich), um API-Calls zu minimieren.
+- [ ] Marktwert-Historie in Bronze vervollstaendigen: 10-Tage-Tuples pro Spieler, `market_value_high_365d`, `market_value_low_365d` aus echter Historie statt Current-Value-Fallback.
+- [ ] Fallback-Strategie fuer Marktwert-Historie implementieren, falls kein dedizierter API-Endpunkt verfuegbar ist (Historisierung aus taeglichen Snapshots).
+- [x] LigaInsider Konkurrenz-Extraktion auf UI-Logik umstellen: Positions-Kandidaten ueber den gruennen Pfeil/Carousel pro Spieler erfassen.
+- [x] LigaInsider Felder `competition_player_count` und `competition_player_names` gegen die echte Positionskonkurrenz validieren (Regression-Tests + Sample-basierte QA).
+- [x] Silver v0.9 umgesetzt: `silver.player_snapshot` als Joined Base (Kickbase + LigaInsider, eine Zeile pro Spieler/Snapshot) mit logisch gruppierten Feature-Spalten fuer Punkte, Aufstellchance und Marktwert.
+- [x] Silver v0.9 umgesetzt: `silver.team_matchup_snapshot` (eine Zeile pro Team/naechstes Matchup) inkl. Odds-Features und wahrscheinlicher Aufstellung.
+- [ ] Stabile Player-Identity in Silver weiter haerten: UID-Regeln mit History-Store synchron halten (inkl. spaeterem persistenten Alias-Mapping bei Konflikten).
+- [ ] Silver-Star-Schema fuer spaetere Serving-Layer vorbereiten: Source-IDs (`kickbase_player_id`, `ligainsider_player_slug/id`) als Aliase dokumentieren.
+- [ ] Join-Key-Strategie Odds -> Teams/Fixtures in Silver/Gold weiter haerten (Teamnamen-Normalisierung, Heim/Auswaerts-Mapping, QA-Checks).
+- [ ] Transfer-Intelligence vorbereiten: globale/indikative League-Transferstroeme pruefen (falls API-seitig verfuegbar), um Marktwertdynamik im Modell zu erklaeren.
+- [ ] Start model calibration (logistic/GBM).
+- [ ] MW forecast model (delta_7d).
+- [ ] Opponent/team strength features.
+- [ ] Model registry + experiment tracking.
 
 ### Next Steps (2026-02-23)
 - [x] Bronze live validiert: alle drei Quellen (`kickbase`, `ligainsider`, `odds`) liefern Daten.
@@ -398,6 +431,13 @@ kickbase-analyzer/
 - [x] Bronze vereinheitlichen: altes `kickbase_match_stats` final aus lokalen Artefakten entfernt.
 - [x] History-Schema/ETL auf Teamkuerzel-UIDs umgestellt (`dim_team.team_uid`, `bridge_player_team.team_uid`, `dim_match.home/away_team_uid`).
 - [x] 50-Spieler-Load als naechster Ingestion-Step gefahren und Laufzeit/API-Rate validiert.
-- [ ] Silver v0.9 starten: `silver.player_snapshot` als sauberer Join-Layer implementieren.
-- [ ] Silver v0.9 starten: `silver.team_matchup_snapshot` mit Odds-Features und Formkurve.
-- [ ] Gold v1.0 spezifizieren: klare Feature-Gruppen fuer Startet, Punkte, Marktwert.
+- [x] Silver v0.9 umgesetzt: `silver.player_snapshot` als sauberer Join-Layer implementiert.
+- [x] Silver v0.9 umgesetzt: `silver.team_matchup_snapshot` mit Odds-Features und wahrscheinlicher Aufstellung.
+- [x] Gold v1.0 spezifiziert: klare Feature-Gruppen fuer Startet, Minuten, Rohpunkte, On-Top-Punkte und Marktwert dokumentiert (`docs/ml_workflow.md`).
+- [x] ML-Training-Runner gebaut (`scripts/ml/train_hierarchical_models.py`): sklearn vs PyTorch Vergleich je Fold inkl. Artefakt-Export.
+- [x] Historical-CV auf Postgres-RAW + Silver-Features als lokaler Pipeline-Step integriert (walk-forward Splits + Fold-Metriken).
+- [x] End-to-End Self-Run (ohne manuelle Python-Schritte) im Container gegen lokale Postgres-DB erfolgreich validiert; ML-Artefakte werden in `data/ml_runs/<run_ts>/` erzeugt.
+- [x] Champion-Selektion im ML-Run verankert (`live_predictions_champion.csv` + `champion_selection.json`).
+- [x] BigQuery-RAW Export/Load fuer ML-Artefakte implementiert (`ml_live_predictions`, `ml_cv_fold_metrics`, `ml_champion_selection`, `ml_run_summary`).
+- [x] BigQuery ML CORE/MARTS Views implementiert (`v_ml_*`, `mart_ml_player_predictions`, `mart_ml_model_monitoring`) inkl. Apply-Step in der ML-Pipeline.
+- [x] Historical-CV als regelmaessigen Scheduler-Job verankert (lokaler ML-Pipeline-Scheduler inkl. optionalem BigQuery-Upload).

@@ -35,6 +35,12 @@ dev = [
   "ruff>=0.9.0",
   "mypy>=1.11.0"
 ]
+ml = [
+  "numpy>=1.26.0,<3.0.0",
+  "pandas>=2.2.0,<3.0.0",
+  "scikit-learn>=1.4.0,<2.0.0",
+  "torch>=2.2.0"
+]
 
 [project.scripts]
 kickbase-ingestion = "local_ingestion.runners.run_ingestion:main"

@@ -1,0 +1,15 @@
+# ------------------------------------
+# requirements-ml.txt
+#
+# Zusaetzliche Abhaengigkeiten fuer lokales ML-Training
+# (sklearn + PyTorch Vergleich).
+#
+# Usage
+# ------------------------------------
+# - python -m pip install -r requirements-ml.txt
+# ------------------------------------
+
+numpy>=1.26.0,<3.0.0
+pandas>=2.2.0,<3.0.0
+scikit-learn>=1.4.0,<2.0.0
+torch>=2.2.0

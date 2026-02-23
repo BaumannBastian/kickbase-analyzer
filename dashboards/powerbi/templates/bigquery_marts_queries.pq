@@ -46,3 +46,18 @@ shared mart_marketvalue_dashboard =
     in
         viewOrTable;
 
+shared mart_ml_player_predictions =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_ml_player_predictions", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_ml_player_predictions", Kind = "Table"]}[Data]
+    in
+        viewOrTable;
+
+shared mart_ml_model_monitoring =
+    let
+        viewOrTable =
+            try DatasetData{[Name = "mart_ml_model_monitoring", Kind = "View"]}[Data]
+            otherwise DatasetData{[Name = "mart_ml_model_monitoring", Kind = "Table"]}[Data]
+    in
+        viewOrTable;

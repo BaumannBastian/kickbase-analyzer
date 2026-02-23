@@ -56,3 +56,40 @@ AVERAGEX(
     mart_risk_overview[p90_points] - mart_risk_overview[p10_points]
 )
 
+-- Tabelle: mart_ml_player_predictions
+[ML Players] =
+DISTINCTCOUNT(mart_ml_player_predictions[player_uid])
+
+[ML Avg Expected Points Next] =
+AVERAGE(mart_ml_player_predictions[expected_points_next_match])
+
+[ML Avg Start Probability] =
+AVERAGE(mart_ml_player_predictions[start_probability])
+
+[ML Avg Sub Probability] =
+AVERAGE(mart_ml_player_predictions[sub_probability])
+
+[ML Avg Expected Minutes] =
+AVERAGE(mart_ml_player_predictions[expected_minutes])
+
+[ML Avg Raw Points Next] =
+AVERAGE(mart_ml_player_predictions[expected_raw_points_next_match])
+
+[ML Avg OnTop Points Next] =
+AVERAGE(mart_ml_player_predictions[expected_on_top_points_next_match])
+
+-- Tabelle: mart_ml_model_monitoring
+[ML Latest Run TS] =
+MAX(mart_ml_model_monitoring[ml_run_ts])
+
+[ML Latest RMSE Champion] =
+VAR latestRun = MAX(mart_ml_model_monitoring[ml_run_ts])
+RETURN
+MAXX(
+    FILTER(mart_ml_model_monitoring, mart_ml_model_monitoring[ml_run_ts] = latestRun),
+    IF(
+        mart_ml_model_monitoring[champion_model] = "torch",
+        mart_ml_model_monitoring[torch_points_total_rmse],
+        mart_ml_model_monitoring[sklearn_points_total_rmse]
+    )
+)

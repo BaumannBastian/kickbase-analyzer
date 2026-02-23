@@ -39,9 +39,8 @@ from databricks.jobs.common_io import (
 
 
 INPUT_DATASETS = [
-    "dim_player",
-    "fct_player_daily",
-    "fct_player_match",
+    "player_snapshot",
+    "team_matchup_snapshot",
 ]
 
 
@@ -111,16 +110,27 @@ def _card_risk(status: str, competition_risk: str) -> float:
     return _clamp(risk, 0.05, 0.30)
 
 
-def _latest_match_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _team_context_by_uid(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:
-        uid = str(row.get("player_uid", "")).strip()
-        if not uid:
+        team_uid = str(row.get("team_uid", "")).strip()
+        if not team_uid:
             continue
-        matchday = int(_to_float(row.get("matchday"), 0.0))
-        current = latest.get(uid)
-        if current is None or matchday > int(_to_float(current.get("matchday"), 0.0)):
-            latest[uid] = row
+        current = latest.get(team_uid)
+        if current is None:
+            latest[team_uid] = row
+            continue
+
+        current_has_odds = current.get("win_probability") is not None
+        candidate_has_odds = row.get("win_probability") is not None
+        if not current_has_odds and candidate_has_odds:
+            latest[team_uid] = row
+            continue
+
+        current_commence = str(current.get("commence_time", "")).strip()
+        candidate_commence = str(row.get("commence_time", "")).strip()
+        if candidate_commence and (not current_commence or candidate_commence < current_commence):
+            latest[team_uid] = row
     return latest
 
 
@@ -214,12 +224,9 @@ def run_gold_features(
         selected_timestamp,
     )
 
-    dim_rows = read_ndjson(input_files["dim_player"])
-    daily_rows = read_ndjson(input_files["fct_player_daily"])
-    match_rows = read_ndjson(input_files["fct_player_match"])
-
-    dim_by_uid = {str(row.get("player_uid")): row for row in dim_rows}
-    latest_match = _latest_match_rows(match_rows)
+    player_rows = read_ndjson(input_files["player_snapshot"])
+    team_rows = read_ndjson(input_files["team_matchup_snapshot"])
+    team_context_by_uid = _team_context_by_uid(team_rows)
 
     feat_player_daily: list[dict[str, Any]] = []
     feat_player_matchday: list[dict[str, Any]] = []
@@ -227,16 +234,23 @@ def run_gold_features(
 
     players_with_li_fields = 0
 
-    for daily in daily_rows:
-        player_uid = str(daily.get("player_uid", "")).strip()
+    for player in player_rows:
+        player_uid = str(player.get("player_uid", "")).strip()
         if not player_uid:
             continue
 
-        dim = dim_by_uid.get(player_uid, {})
-        position = str(dim.get("position", ""))
-        status = str(daily.get("status", ""))
-        lineup = str(daily.get("predicted_lineup", ""))
-        competition_risk = str(daily.get("competition_risk", ""))
+        position = str(player.get("player_position", ""))
+        status = str(player.get("injury_status", "")).strip() or str(player.get("li_status", "")).strip()
+        lineup = str(player.get("li_predicted_lineup", "")).strip()
+        competition_risk = str(player.get("li_competition_risk", "")).strip()
+        if not competition_risk:
+            competition_count = int(_to_float(player.get("li_competition_player_count"), 0.0))
+            if competition_count <= 0:
+                competition_risk = "low"
+            elif competition_count == 1:
+                competition_risk = "medium"
+            else:
+                competition_risk = "high"
 
         if lineup or competition_risk:
             players_with_li_fields += 1
@@ -244,12 +258,13 @@ def run_gold_features(
         start_prob = _start_probability(status, lineup, competition_risk)
         p_dnp = 1.0 - start_prob
 
-        match = latest_match.get(player_uid, {})
-        raw_points_recent = _to_float(match.get("raw_points"), 45.0)
-        matchday = int(_to_float(match.get("matchday"), 0.0))
+        raw_points_recent = _to_float(player.get("last_match_points"), _to_float(player.get("average_points"), 45.0))
+        matchday = int(_to_float(player.get("last_matchday"), 0.0))
 
         scorer_prob = _scorer_probability(position)
-        team_win_prob = 0.5
+        team_uid = str(player.get("team_uid", "")).strip()
+        team_context = team_context_by_uid.get(team_uid, {})
+        team_win_prob = _to_float(team_context.get("win_probability"), 0.5)
         card_risk = _card_risk(status, competition_risk)
 
         base_raw_ev = start_prob * (raw_points_recent * 0.78)
@@ -274,7 +289,7 @@ def run_gold_features(
         p50_points = mc_summary["p50_points"]
         p90_points = mc_summary["p90_points"]
 
-        market_value = _to_float(daily.get("market_value"), 0.0)
+        market_value = _to_float(player.get("market_value"), 0.0)
         expected_mv_change_1d = market_value * ((pred_total - 50.0) / 1000.0)
         expected_mv_next = market_value + expected_mv_change_1d
         expected_mv_change_7d = expected_mv_change_1d * 7.0
@@ -285,10 +300,10 @@ def run_gold_features(
 
         base_row = {
             "player_uid": player_uid,
-            "player_name": dim.get("canonical_name"),
-            "team": dim.get("team"),
+            "player_name": player.get("player_name"),
+            "team": player.get("team_uid") or player.get("team_name"),
             "position": position,
-            "snapshot_date": daily.get("snapshot_date"),
+            "snapshot_date": player.get("snapshot_date"),
             "start_probability": round(start_prob, 4),
             "expected_points_next_matchday": round(pred_total, 3),
             "p_dnp": round(p_dnp, 4),
@@ -316,7 +331,7 @@ def run_gold_features(
         points_components_matchday.append(
             {
                 "player_uid": player_uid,
-                "player_name": dim.get("canonical_name"),
+                "player_name": player.get("player_name"),
                 "matchday": matchday,
                 "base_raw_ev": round(base_raw_ev, 3),
                 "scorer_ev": round(scorer_ev, 3),

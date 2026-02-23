@@ -50,12 +50,14 @@ CI ist auf `bash`-Aufruf der Skripte umgestellt, damit keine Execute-Bit-Problem
 - `docs/setup_databricks_bigquery.md`
 - `docs/setup_powerbi_desktop.md`
 - `docs/setup_postgres_history.md`
+- `docs/ml_workflow.md`
 
 ## Quick Start (PowerShell)
 
 ```powershell
 cd "C:\Users\basti\Documents\Kickbase Analyzer"
 python -m pip install -e .
+python -m pip install -r requirements-ml.txt
 ```
 
 ### Connectivity Checks
@@ -227,11 +229,63 @@ BigQuery Pipeline:
 ./scripts/bigquery/run_apply_views_bq.sh --project <gcp_project_id>
 ```
 
+ML -> BigQuery RAW + ML Views:
+
+```powershell
+./scripts/bigquery/run_ml_bigquery_pipeline.sh --env-file .env --project <gcp_project_id>
+./scripts/bigquery/run_apply_ml_views_bq.sh --project <gcp_project_id>
+```
+
 Power BI Desktop Asset Pack:
 
 ```powershell
 python -m scripts.powerbi_desktop.export_desktop_assets --project <gcp_project_id>
 ```
+
+## ML Training (historical CV)
+
+Trainingspfad:
+- `silver -> gold -> lokal (ML) -> BigQuery RAW -> BigQuery CORE -> BigQuery MARTS -> Power BI`
+- Kein Rueckschreiben von lokal nach Databricks Gold.
+
+Training + CV starten:
+
+```powershell
+python -m scripts.ml.train_hierarchical_models --env-file .env --cv-splits 4 --validation-days 21
+```
+
+Nur sklearn (ohne Torch):
+
+```powershell
+python -m scripts.ml.train_hierarchical_models --env-file .env --skip-torch
+```
+
+End-to-end ML -> BigQuery RAW (Champion inklusive):
+
+```powershell
+python -m scripts.ml.run_ml_bigquery_pipeline --env-file .env --project <gcp_project_id>
+```
+
+Scheduler fuer regelmaessige CV-Runs:
+
+```powershell
+python -m scripts.ml.run_ml_pipeline_scheduler --interval-seconds 21600 -- --env-file .env --project <gcp_project_id>
+```
+
+Outputs pro Lauf:
+- `data/ml_runs/<run_ts>/cv_sklearn_folds.csv`
+- `data/ml_runs/<run_ts>/cv_sklearn_summary.json`
+- `data/ml_runs/<run_ts>/live_predictions_sklearn.csv`
+- `data/ml_runs/<run_ts>/live_predictions_champion.csv`
+- `data/ml_runs/<run_ts>/champion_selection.json`
+- optional Torch: `cv_torch_folds.csv`, `cv_torch_summary.json`, `live_predictions_torch.csv`
+- `data/ml_runs/<run_ts>/run_summary.json`
+
+BigQuery ML RAW Export-Dateien:
+- `data/warehouse/raw_ml/ml_live_predictions.jsonl`
+- `data/warehouse/raw_ml/ml_cv_fold_metrics.jsonl`
+- `data/warehouse/raw_ml/ml_champion_selection.jsonl`
+- `data/warehouse/raw_ml/ml_run_summary.jsonl`
 
 ## Roadmap (Kurz)
 
@@ -239,9 +293,10 @@ python -m scripts.powerbi_desktop.export_desktop_assets --project <gcp_project_i
 - History-Load in kontrollierten Batches skalieren (5 -> 50 -> Full Roster).
 - Silver v0.9:
   - `silver.player_snapshot` (Kickbase + LigaInsider Join, eine Zeile je Spieler/Snapshot)
-  - `silver.team_matchup_snapshot` (naechstes Matchup, Odds-Features, Formkurve)
+  - `silver.team_matchup_snapshot` (naechstes Matchup, Odds-Features, wahrscheinliche Aufstellung)
 - Gold v1.0:
-  - Features fuer Startet/Punkte/Marktwert in getrennten, klaren Feature-Sets
+  - Hierarchische ML-Modelle (sklearn + PyTorch) auf gemeinsamem Preprocessing
+  - Feature Engineering fuer Start/Sub/Minuten/Rohpunkte/On-Top-Punkte
   - Modellierung + Kalibrierung + Backtesting-Haertung
 
 ## To-do morgen (2026-02-23)
@@ -272,13 +327,13 @@ Erledigt heute:
 Offen fuer morgen (V0.9):
 - [ ] Kickbase-Ingestion-Frequenzen entkoppeln (Marktwert taeglich, Performance an Spieltagen, Status/Lineup intraday).
 - [ ] Bronze QA: Teamnamen-Normalisierung Odds -> Club-Mapping vorbereiten
-- [ ] BigQuery-Rolle final festziehen: Welche Tabellen aus Postgres-History + Databricks Gold + ML als Reporting-Layer gebraucht werden.
-- [ ] BigQuery-Loadpfad fuer History definieren (Postgres -> BigQuery RAW_HISTORY/CORE) ohne Datenverdopplung.
-- [ ] Bildstrategie dokumentieren: `image_blob` bleibt nur lokal in Postgres; in BigQuery nur Metadaten (`player_uid`, `image_mime`, `image_sha256`, `image_local_path`).
+- [x] BigQuery-Rolle final festgezogen: Reporting-Layer basiert auf Databricks Gold + ML-Outputs; History nur selektiv nach BI-Use-Case.
+- [x] BigQuery-Loadpfad fuer History definiert: kein blindes RAW_HISTORY Full-Dump; initial nur Gold + ML in BigQuery.
+- [x] Bildstrategie dokumentiert: `image_blob` bleibt lokal in Postgres; in BigQuery nur Metadaten (`player_uid`, `image_mime`, `image_sha256`, `image_local_path`).
 - [ ] Event-Parser fuer Sonderfaelle haerten (`event_points_total=0` bei vorhandenen Match-Punkten) und Datenquelle gegen Kickbase-UI gegentesten
 - [ ] Konsistenzcheck als festen Gate-Step in den Batch-Runner integrieren (Warnung/Abbruch bei groesseren Abweichungen)
-- [ ] Silver Tabelle `player_snapshot` bauen (nur Sammeln/Joinen, noch keine Modelllogik)
-- [ ] Silver Tabelle `team_matchup_snapshot` bauen
+- [x] Silver Tabelle `player_snapshot` gebaut (Kickbase + LigaInsider in einer Zeile pro Spieler/Snapshot)
+- [x] Silver Tabelle `team_matchup_snapshot` gebaut (Odds + wahrscheinliche Aufstellung pro Team)
 - [ ] Persistente `player_uid`-Vergabe mit Mapping-Historie aufsetzen
 - [ ] Databricks Bronze Job so erweitern, dass Odds-only Runs ohne KB/LI-Timestamp-Konflikt ingestiert werden
 - [ ] Erste Gold-Spezifikation fuer drei Targets finalisieren (spielt, punkte, marktwert)
